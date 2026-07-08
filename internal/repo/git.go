@@ -26,3 +26,21 @@ func gitOutput(dir string, args ...string) (string, error) {
 
 	return strings.TrimSpace(stdout.String()), nil
 }
+
+func GitRun(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), message)
+	}
+
+	return nil
+}
