@@ -6,7 +6,7 @@ Safe bulk Git operations for developers who keep many local repositories.
 
 Early development. The first goal is a small CLI that can discover local Git repositories, report their status, and plan safe sync operations.
 
-## Planned Commands
+## Commands
 
 ```text
 omp-git-fleet scan   --root <path>
@@ -30,6 +30,7 @@ Contributors need the Go SDK installed locally.
 go test ./...
 go run ./cmd/omp-git-fleet scan --root .
 go run ./cmd/omp-git-fleet status --root .
+go run ./cmd/omp-git-fleet sync --root . --target develop --dry-run
 ```
 
 ## Non-Goals For The First Version

@@ -2,7 +2,6 @@ package repo
 
 import (
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 )
@@ -26,7 +25,10 @@ func Discover(root string) ([]Repository, error) {
 			return nil
 		}
 		if entry.Name() == ".git" {
-			repos = append(repos, Repository{Path: filepath.Dir(path)})
+			repoPath := filepath.Dir(path)
+			if isGitRepository(repoPath) {
+				repos = append(repos, Repository{Path: repoPath})
+			}
 			return filepath.SkipDir
 		}
 		if shouldSkipDir(entry.Name()) && path != absRoot {
@@ -53,7 +55,7 @@ func shouldSkipDir(name string) bool {
 	}
 }
 
-func gitDirExists(path string) bool {
-	info, err := os.Stat(filepath.Join(path, ".git"))
-	return err == nil && info.IsDir()
+func isGitRepository(path string) bool {
+	output, err := gitOutput(path, "rev-parse", "--is-inside-work-tree")
+	return err == nil && output == "true"
 }
