@@ -1,0 +1,14 @@
+# Go
+bin/
+dist/
+*.exe
+*.test
+coverage.out
+
+# Editors
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
