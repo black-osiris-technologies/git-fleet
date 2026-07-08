@@ -4,7 +4,7 @@ Safe bulk Git operations for developers who keep many local repositories.
 
 ## Status
 
-Early development. The first goal is a small CLI that can discover local Git repositories, report their status, and plan safe sync operations.
+Early development. The CLI can discover local Git repositories, report their status, plan safe sync operations, and sync clean repositories.
 
 ## Commands
 
@@ -19,10 +19,14 @@ omp-git-fleet sync   --root <path> --target develop
 
 - Discover Git repositories under a root directory.
 - Show current branch and dirty state per repository.
-- Resolve target branches such as `develop`, `master`, `main`, and later `latest-release`.
+- Resolve target branches such as `develop`, `master`, `main`, and `latest-release`.
 - Prefer dry-run and explicit safety checks for risky operations.
 - Skip dirty repositories by default.
 - Sync clean repositories with `fetch --prune`, checkout/tracking branch setup, and `pull --ff-only`.
+
+## Safety
+
+Start with `--dry-run` to inspect the plan. Running `sync` without `--dry-run` executes Git commands in every clean repository found under the root path.
 
 ## Development
 
