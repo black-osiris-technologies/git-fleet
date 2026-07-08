@@ -22,6 +22,16 @@ omp-git-fleet sync   --root <path> --target develop --dry-run
 - Prefer dry-run and explicit safety checks for risky operations.
 - Skip dirty repositories by default.
 
+## Development
+
+Contributors need the Go SDK installed locally.
+
+```text
+go test ./...
+go run ./cmd/omp-git-fleet scan --root .
+go run ./cmd/omp-git-fleet status --root .
+```
+
 ## Non-Goals For The First Version
 
 - Bulk commit.
