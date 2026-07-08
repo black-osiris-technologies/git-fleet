@@ -12,6 +12,7 @@ Early development. The first goal is a small CLI that can discover local Git rep
 omp-git-fleet scan   --root <path>
 omp-git-fleet status --root <path>
 omp-git-fleet sync   --root <path> --target develop --dry-run
+omp-git-fleet sync   --root <path> --target develop
 ```
 
 ## MVP Scope
@@ -21,6 +22,7 @@ omp-git-fleet sync   --root <path> --target develop --dry-run
 - Resolve target branches such as `develop`, `master`, `main`, and later `latest-release`.
 - Prefer dry-run and explicit safety checks for risky operations.
 - Skip dirty repositories by default.
+- Sync clean repositories with `fetch --prune`, checkout/tracking branch setup, and `pull --ff-only`.
 
 ## Development
 

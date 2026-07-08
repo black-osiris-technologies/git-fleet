@@ -83,9 +83,6 @@ func runSync(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if !*dryRun {
-		return fmt.Errorf("sync execution is not implemented yet; use --dry-run")
-	}
 
 	repos, err := repo.Discover(*root)
 	if err != nil {
@@ -95,11 +92,14 @@ func runSync(args []string) error {
 	summary := syncplan.Summary{}
 	for _, r := range repos {
 		plan := syncplan.Plan(r.Path, *target)
+		if !*dryRun {
+			plan = syncplan.Execute(r.Path, *target)
+		}
 		summary.Add(plan)
 		fmt.Printf("%s\t%s\t%s\n", plan.RepoPath, plan.Action, plan.Message)
 	}
 
-	fmt.Printf("summary\ttotal=%d\tready=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Ready, summary.Skipped, summary.Failed)
+	fmt.Printf("summary\ttotal=%d\tready=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Ready, summary.Done, summary.Skipped, summary.Failed)
 	return nil
 }
 
@@ -116,5 +116,5 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  scan    Discover Git repositories")
 	fmt.Println("  status  Show branch and dirty state")
-	fmt.Println("  sync    Plan safe repository synchronization")
+	fmt.Println("  sync    Plan or execute safe repository synchronization")
 }
