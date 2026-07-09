@@ -13,6 +13,8 @@ omp-git-fleet scan   --root <path>
 omp-git-fleet status --root <path>
 omp-git-fleet sync   --root <path> --target develop --dry-run
 omp-git-fleet sync   --root <path> --target develop
+omp-git-fleet release-pr    --root <path> --from latest-release --to master --dry-run
+omp-git-fleet release-merge --root <path> --from latest-release --to master --merge-method merge --dry-run
 ```
 
 ## MVP Scope
@@ -23,10 +25,13 @@ omp-git-fleet sync   --root <path> --target develop
 - Prefer dry-run and explicit safety checks for risky operations.
 - Skip dirty repositories by default.
 - Sync clean repositories with `fetch --prune`, checkout/tracking branch setup, and `pull --ff-only`.
+- Create and merge release pull requests from `latest-release` to `master` or `develop`.
 
 ## Safety
 
 Start with `--dry-run` to inspect the plan. Running `sync` without `--dry-run` executes Git commands in every clean repository found under the root path.
+
+Release merges use normal merge commits only. Squash merges are intentionally not supported.
 
 ## Development
 
@@ -37,13 +42,13 @@ go test ./...
 go run ./cmd/omp-git-fleet scan --root .
 go run ./cmd/omp-git-fleet status --root .
 go run ./cmd/omp-git-fleet sync --root . --target develop --dry-run
+go run ./cmd/omp-git-fleet release-pr --root . --from latest-release --to master --dry-run
 ```
 
 ## Non-Goals For The First Version
 
 - Bulk commit.
 - Bulk push.
-- Pull request creation.
 - Automatic branch deletion.
 
 ## License
