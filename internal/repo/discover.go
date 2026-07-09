@@ -19,7 +19,7 @@ func Discover(root string) ([]Repository, error) {
 	var repos []Repository
 	err = filepath.WalkDir(absRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			return nil
 		}
 		if !entry.IsDir() {
 			return nil
@@ -48,7 +48,7 @@ func Discover(root string) ([]Repository, error) {
 
 func shouldSkipDir(name string) bool {
 	switch name {
-	case "node_modules", "vendor", "dist", "build", "target", ".idea", ".vscode":
+	case "node_modules", "vendor", "dist", "build", "target", ".idea", ".vscode", ".tmp":
 		return true
 	default:
 		return false
