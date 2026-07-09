@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/black-osiris-technologies/omp-git-fleet/internal/releaseflow"
 	"github.com/black-osiris-technologies/omp-git-fleet/internal/repo"
+	"github.com/black-osiris-technologies/omp-git-fleet/internal/syncplan"
 )
 
 func main() {
@@ -26,6 +28,12 @@ func run(args []string) error {
 		return runScan(args[1:])
 	case "status":
 		return runStatus(args[1:])
+	case "sync":
+		return runSync(args[1:])
+	case "release-pr":
+		return runReleasePR(args[1:])
+	case "release-merge":
+		return runReleaseMerge(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -72,6 +80,94 @@ func runStatus(args []string) error {
 	return nil
 }
 
+func runSync(args []string) error {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	target := fs.String("target", "develop", "target branch: develop, master, main, or latest-release")
+	dryRun := fs.Bool("dry-run", false, "show the sync plan without changing repositories")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	repos, err := repo.Discover(*root)
+	if err != nil {
+		return err
+	}
+
+	summary := syncplan.Summary{}
+	for _, r := range repos {
+		plan := syncplan.Plan(r.Path, *target)
+		if !*dryRun {
+			plan = syncplan.Execute(r.Path, *target)
+		}
+		summary.Add(plan)
+		fmt.Printf("%s\t%s\t%s\n", plan.RepoPath, plan.Action, plan.Message)
+	}
+
+	fmt.Printf("summary\ttotal=%d\tready=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Ready, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
+func runReleasePR(args []string) error {
+	fs := flag.NewFlagSet("release-pr", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	from := fs.String("from", "latest-release", "source branch: explicit branch name or latest-release")
+	to := fs.String("to", "master", "target branch, usually master or develop")
+	dryRun := fs.Bool("dry-run", false, "show the release PR plan without creating pull requests")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	repos, err := repo.Discover(*root)
+	if err != nil {
+		return err
+	}
+
+	summary := releaseflow.Summary{}
+	for _, r := range repos {
+		result := releaseflow.PlanPR(r.Path, *from, *to)
+		if !*dryRun {
+			result = releaseflow.CreatePR(r.Path, *from, *to, releaseflow.RealRunner{})
+		}
+		summary.Add(result)
+		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
+	}
+	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
+func runReleaseMerge(args []string) error {
+	fs := flag.NewFlagSet("release-merge", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	from := fs.String("from", "latest-release", "source branch: explicit branch name or latest-release")
+	to := fs.String("to", "master", "target branch, usually master or develop")
+	mergeMethod := fs.String("merge-method", "merge", "GitHub merge method; only merge is supported")
+	dryRun := fs.Bool("dry-run", false, "show the release merge plan without merging pull requests")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *mergeMethod != "merge" {
+		return fmt.Errorf("unsupported merge method %q; only merge commits are allowed", *mergeMethod)
+	}
+
+	repos, err := repo.Discover(*root)
+	if err != nil {
+		return err
+	}
+
+	summary := releaseflow.Summary{}
+	for _, r := range repos {
+		result := releaseflow.PlanMerge(r.Path, *from, *to)
+		if !*dryRun {
+			result = releaseflow.MergePR(r.Path, *from, *to, releaseflow.RealRunner{})
+		}
+		summary.Add(result)
+		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
+	}
+	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
 func cleanLabel(dirty bool) string {
 	if dirty {
 		return "dirty"
@@ -85,4 +181,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  scan    Discover Git repositories")
 	fmt.Println("  status  Show branch and dirty state")
+	fmt.Println("  sync    Plan or execute safe repository synchronization")
+	fmt.Println("  release-pr     Plan or create release pull requests")
+	fmt.Println("  release-merge  Plan or merge release pull requests with merge commits")
 }

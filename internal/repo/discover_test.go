@@ -2,6 +2,7 @@ package repo
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -33,7 +34,12 @@ func TestDiscoverFindsGitRepositories(t *testing.T) {
 
 func mkdirGit(t *testing.T, path string) {
 	t.Helper()
-	mustMkdir(t, filepath.Join(path, ".git"))
+	mustMkdir(t, path)
+	cmd := exec.Command("git", "init")
+	cmd.Dir = path
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init in %q error = %v: %s", path, err, string(output))
+	}
 }
 
 func mustMkdir(t *testing.T, path string) {
