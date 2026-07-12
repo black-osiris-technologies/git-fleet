@@ -3,8 +3,8 @@ package syncplan
 import (
 	"fmt"
 
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/branch"
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/repo"
+	"github.com/black-osiris-technologies/git-fleet/internal/branch"
+	"github.com/black-osiris-technologies/git-fleet/internal/repo"
 )
 
 type Action string
