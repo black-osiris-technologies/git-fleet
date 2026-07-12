@@ -22,7 +22,9 @@ Git Fleet scans a directory of local repositories, explains what it would change
 Requirements: Git and Go 1.22 or newer.
 
 ```bash
-go install github.com/black-osiris-technologies/git-fleet/cmd/git-fleet@latest
+git clone https://github.com/black-osiris-technologies/git-fleet.git
+cd git-fleet
+go install ./cmd/git-fleet
 
 git-fleet scan --root ~/code
 git-fleet status --root ~/code
@@ -70,6 +72,8 @@ Always keep independent backups for important work. A coordination tool cannot r
 ## Project Status
 
 Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, and GitFlow release pull requests. Interfaces may evolve before v1.0.
+
+The repository was renamed after v0.1.0. Installing the new module path with `go install ...@latest` will be supported starting with v0.2.0; until then, install from source as shown above.
 
 See [CHANGELOG.md](CHANGELOG.md) for shipped changes and the [issue tracker](https://github.com/black-osiris-technologies/git-fleet/issues) for planned work.
 
