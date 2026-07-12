@@ -1,0 +1,39 @@
+name: Bug report
+description: Report reproducible incorrect or unsafe behavior.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide a minimal repository layout and command. Remove private URLs and credentials.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Git Fleet version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Git version, and Go version if running from source.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private remote URLs, and sensitive repository content.
+          required: true
