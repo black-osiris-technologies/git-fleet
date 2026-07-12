@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/branch"
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/repo"
+	"github.com/black-osiris-technologies/git-fleet/internal/branch"
+	"github.com/black-osiris-technologies/git-fleet/internal/repo"
 )
 
 type Action string
@@ -95,7 +95,7 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 	}
 
 	title := fmt.Sprintf("Release %s into %s", release.LocalBranch, to)
-	body := "Created by omp-git-fleet release-pr. Merge with a merge commit; do not squash."
+	body := "Created by git-fleet release-pr. Merge with a merge commit; do not squash."
 	output, err := runner.Run(repoPath, "gh", "pr", "create", "--base", to, "--head", release.LocalBranch, "--title", title, "--body", body)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {

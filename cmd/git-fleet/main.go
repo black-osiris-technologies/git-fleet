@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/releaseflow"
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/repo"
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/syncplan"
+	"github.com/black-osiris-technologies/git-fleet/internal/releaseflow"
+	"github.com/black-osiris-technologies/git-fleet/internal/repo"
+	"github.com/black-osiris-technologies/git-fleet/internal/syncplan"
 )
 
 func main() {
@@ -176,7 +176,7 @@ func cleanLabel(dirty bool) string {
 }
 
 func printUsage() {
-	fmt.Println("Usage: omp-git-fleet <command> [options]")
+	fmt.Println("Usage: git-fleet <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  scan    Discover Git repositories")

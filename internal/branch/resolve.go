@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/black-osiris-technologies/omp-git-fleet/internal/repo"
+	"github.com/black-osiris-technologies/git-fleet/internal/repo"
 )
 
 type Resolution struct {
