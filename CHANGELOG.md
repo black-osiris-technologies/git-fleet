@@ -4,6 +4,12 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-12
+
+### Fixed
+
+- Updated installation guidance now that the renamed Go module is available from a release tag.
+
 ## [0.2.0] - 2026-07-12
 
 ### Changed
@@ -19,6 +25,7 @@ All notable changes are documented in this file. The project follows [Semantic V
 - Guarded synchronization with dry-run planning.
 - GitFlow release pull request and merge commands.
 
-[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/black-osiris-technologies/git-fleet/releases/tag/v0.1.0
