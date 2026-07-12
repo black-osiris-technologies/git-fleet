@@ -1,56 +1,88 @@
-# omp-git-fleet
+# Git Fleet
 
-Safe bulk Git operations for developers who keep many local repositories.
+> Safe, repeatable Git operations across every repository in your workspace.
 
-## Status
+[![CI](https://github.com/black-osiris-technologies/git-fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/black-osiris-technologies/git-fleet/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/black-osiris-technologies/git-fleet)](https://github.com/black-osiris-technologies/git-fleet/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)](go.mod)
 
-Early development. The CLI can discover local Git repositories, report their status, plan safe sync operations, and sync clean repositories.
+Git Fleet scans a directory of local repositories, explains what it would change, and performs guarded sync or release operations only where it is safe to proceed. It is built for developers who maintain many projects and want one predictable command instead of repetitive shell loops.
+
+## Why Git Fleet
+
+- **Safety first:** dirty repositories are skipped and risky operations are explicit.
+- **Plan before execution:** use `--dry-run` to inspect every intended command.
+- **GitFlow aware:** resolve `develop`, `master`, `main`, or the latest release branch.
+- **Automation friendly:** stable exit behavior and focused commands for scripts and CI.
+- **Cross-platform:** a single Go binary with no runtime dependencies.
+
+## Quick Start
+
+Requirements: Git and Go 1.22 or newer.
+
+```bash
+go install github.com/black-osiris-technologies/git-fleet/cmd/git-fleet@latest
+
+git-fleet scan --root ~/code
+git-fleet status --root ~/code
+git-fleet sync --root ~/code --target develop --dry-run
+```
+
+Review the dry-run output before removing `--dry-run`:
+
+```bash
+git-fleet sync --root ~/code --target develop
+```
 
 ## Commands
 
-```text
-omp-git-fleet scan   --root <path>
-omp-git-fleet status --root <path>
-omp-git-fleet sync   --root <path> --target develop --dry-run
-omp-git-fleet sync   --root <path> --target develop
-omp-git-fleet release-pr    --root <path> --from latest-release --to master --dry-run
-omp-git-fleet release-merge --root <path> --from latest-release --to master --merge-method merge --dry-run
+| Command | Purpose |
+| --- | --- |
+| `scan` | Discover Git repositories below a root directory. |
+| `status` | Report branch and working-tree state for every repository. |
+| `sync` | Fetch, switch, and fast-forward clean repositories to a target branch. |
+| `release-pr` | Create release promotion pull requests using explicit source and target branches. |
+| `release-merge` | Merge a release pull request with a normal merge commit. |
+
+Examples:
+
+```bash
+git-fleet sync --root . --target develop --dry-run
+git-fleet release-pr --root . --from latest-release --to master --dry-run
+git-fleet release-merge --root . --from latest-release --to master --merge-method merge --dry-run
 ```
 
-## MVP Scope
+Run `git-fleet <command> --help` for command-specific options.
 
-- Discover Git repositories under a root directory.
-- Show current branch and dirty state per repository.
-- Resolve target branches such as `develop`, `master`, `main`, and `latest-release`.
-- Prefer dry-run and explicit safety checks for risky operations.
-- Skip dirty repositories by default.
-- Sync clean repositories with `fetch --prune`, checkout/tracking branch setup, and `pull --ff-only`.
-- Create and merge release pull requests from `latest-release` to `master` or `develop`.
+## Safety Model
 
-## Safety
+Git Fleet intentionally favors a stopped operation over an ambiguous mutation.
 
-Start with `--dry-run` to inspect the plan. Running `sync` without `--dry-run` executes Git commands in every clean repository found under the root path.
+- Dirty repositories are skipped by default.
+- Sync uses `fetch --prune` and `pull --ff-only`.
+- Destructive resets, bulk commits, bulk pushes, and automatic branch deletion are out of scope.
+- Release promotions preserve merge history; squash release merges are rejected.
+- Dry-run output is available for operations that can change repository state.
 
-Release merges use normal merge commits only. Squash merges are intentionally not supported.
+Always keep independent backups for important work. A coordination tool cannot replace repository access controls or a recovery plan.
+
+## Project Status
+
+Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, and GitFlow release pull requests. Interfaces may evolve before v1.0.
+
+See [CHANGELOG.md](CHANGELOG.md) for shipped changes and the [issue tracker](https://github.com/black-osiris-technologies/git-fleet/issues) for planned work.
 
 ## Development
 
-Contributors need the Go SDK installed locally.
-
-```text
+```bash
 go test ./...
-go run ./cmd/omp-git-fleet scan --root .
-go run ./cmd/omp-git-fleet status --root .
-go run ./cmd/omp-git-fleet sync --root . --target develop --dry-run
-go run ./cmd/omp-git-fleet release-pr --root . --from latest-release --to master --dry-run
+go vet ./...
+go build ./cmd/git-fleet
 ```
 
-## Non-Goals For The First Version
-
-- Bulk commit.
-- Bulk push.
-- Automatic branch deletion.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md) before opening a pull request.
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
