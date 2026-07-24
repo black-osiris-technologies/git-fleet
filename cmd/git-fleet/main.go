@@ -30,6 +30,8 @@ func run(args []string) error {
 		return runStatus(args[1:])
 	case "sync":
 		return runSync(args[1:])
+	case "release-branch":
+		return runReleaseBranch(args[1:])
 	case "release-pr":
 		return runReleasePR(args[1:])
 	case "release-merge":
@@ -45,10 +47,18 @@ func runScan(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	repos, err := repo.Discover(*root)
+	resolvedRoot, err := resolveRoot(fs, *root)
 	if err != nil {
 		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
 	}
 
 	for _, r := range repos {
@@ -63,10 +73,18 @@ func runStatus(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	repos, err := repo.Discover(*root)
+	resolvedRoot, err := resolveRoot(fs, *root)
 	if err != nil {
 		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
 	}
 
 	for _, r := range repos {
@@ -88,10 +106,18 @@ func runSync(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	repos, err := repo.Discover(*root)
+	resolvedRoot, err := resolveRoot(fs, *root)
 	if err != nil {
 		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
 	}
 
 	summary := syncplan.Summary{}
@@ -117,10 +143,18 @@ func runReleasePR(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	repos, err := repo.Discover(*root)
+	resolvedRoot, err := resolveRoot(fs, *root)
 	if err != nil {
 		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
 	}
 
 	summary := releaseflow.Summary{}
@@ -128,6 +162,40 @@ func runReleasePR(args []string) error {
 		result := releaseflow.PlanPR(r.Path, *from, *to)
 		if !*dryRun {
 			result = releaseflow.CreatePR(r.Path, *from, *to, releaseflow.RealRunner{})
+		}
+		summary.Add(result)
+		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
+	}
+	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
+func runReleaseBranch(args []string) error {
+	fs := flag.NewFlagSet("release-branch", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	dryRun := fs.Bool("dry-run", false, "show the release branch plan without changing repositories")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedRoot, err := resolveRoot(fs, *root)
+	if err != nil {
+		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
+	}
+
+	summary := releaseflow.Summary{}
+	for _, r := range repos {
+		result := releaseflow.PlanBranch(r.Path)
+		if !*dryRun {
+			result = releaseflow.CreateBranch(r.Path, releaseflow.RealRunner{})
 		}
 		summary.Add(result)
 		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
@@ -149,10 +217,18 @@ func runReleaseMerge(args []string) error {
 	if *mergeMethod != "merge" {
 		return fmt.Errorf("unsupported merge method %q; only merge commits are allowed", *mergeMethod)
 	}
-
-	repos, err := repo.Discover(*root)
+	resolvedRoot, err := resolveRoot(fs, *root)
 	if err != nil {
 		return err
+	}
+
+	repos, err := repo.Discover(resolvedRoot)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		fmt.Printf("no repositories found under %s\n", resolvedRoot)
+		return nil
 	}
 
 	summary := releaseflow.Summary{}
@@ -166,6 +242,26 @@ func runReleaseMerge(args []string) error {
 	}
 	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
 	return nil
+}
+
+func resolveRoot(fs *flag.FlagSet, root string) (string, error) {
+	switch fs.NArg() {
+	case 0:
+		return root, nil
+	case 1:
+		rootWasSet := false
+		fs.Visit(func(flag *flag.Flag) {
+			if flag.Name == "root" {
+				rootWasSet = true
+			}
+		})
+		if rootWasSet {
+			return "", fmt.Errorf("root specified twice: use either --root <path> or positional <path>")
+		}
+		return fs.Arg(0), nil
+	default:
+		return "", fmt.Errorf("too many arguments: use --root <path> or one positional root path")
+	}
 }
 
 func cleanLabel(dirty bool) string {
@@ -182,6 +278,7 @@ func printUsage() {
 	fmt.Println("  scan    Discover Git repositories")
 	fmt.Println("  status  Show branch and dirty state")
 	fmt.Println("  sync    Plan or execute safe repository synchronization")
+	fmt.Println("  release-branch Plan or create the next release branch from synced develop")
 	fmt.Println("  release-pr     Plan or create release pull requests")
 	fmt.Println("  release-merge  Plan or merge release pull requests with merge commits")
 }

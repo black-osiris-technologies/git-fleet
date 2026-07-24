@@ -4,6 +4,15 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added `release-branch` to create the next `release-X.Y` branch from a clean, synced local `develop`.
+
+### Changed
+
+- Clarified `go install` behavior and how to add Go's binary directory to `PATH`.
+- Commands now accept a positional root path and report when no repositories are found.
+
 ## [0.2.1] - 2026-07-12
 
 ### Fixed

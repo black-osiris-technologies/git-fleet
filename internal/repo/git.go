@@ -27,6 +27,10 @@ func gitOutput(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func GitOutput(dir string, args ...string) (string, error) {
+	return gitOutput(dir, args...)
+}
+
 func GitRun(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
