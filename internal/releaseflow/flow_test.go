@@ -87,6 +87,7 @@ type fakeRunner struct {
 	outputs    map[string]string
 	sawMerge   bool
 	usedSquash bool
+	sawDelete  bool
 }
 
 func (f *fakeRunner) Run(_ string, command string, args ...string) (string, error) {
@@ -99,6 +100,9 @@ func (f *fakeRunner) Run(_ string, command string, args ...string) (string, erro
 				f.usedSquash = true
 			}
 		}
+	}
+	if command == "git" && len(args) >= 2 && args[0] == "push" && contains(args, "--delete") {
+		f.sawDelete = true
 	}
 	key := strings.TrimSpace(command + " " + strings.Join(args, " "))
 	return f.outputs[key], nil

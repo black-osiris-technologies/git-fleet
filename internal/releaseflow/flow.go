@@ -133,23 +133,33 @@ func MergePR(repoPath, from, to string, runner Runner) Result {
 	if err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
+
+	action, message := mergeReleaseInto(repoPath, release.LocalBranch, to, runner)
+	return Result{RepoPath: repoPath, Action: action, Message: message}
+}
+
+// mergeReleaseInto merges the open pull request from releaseBranch into the
+// target branch with a merge commit. A missing target or absent open PR yields a
+// skip so callers can treat an already-integrated line as safe to re-run; only a
+// git or gh failure yields a failed action.
+func mergeReleaseInto(repoPath, releaseBranch, to string, runner Runner) (Action, string) {
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return ActionSkipped, err.Error()
 	}
 
-	number, err := runner.Run(repoPath, "gh", "pr", "list", "--base", to, "--head", release.LocalBranch, "--state", "open", "--json", "number", "--jq", ".[0].number")
+	number, err := runner.Run(repoPath, "gh", "pr", "list", "--base", to, "--head", releaseBranch, "--state", "open", "--json", "number", "--jq", ".[0].number")
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+		return ActionFailed, err.Error()
 	}
 	if strings.TrimSpace(number) == "" {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("no open release PR %s -> %s", release.LocalBranch, to)}
+		return ActionSkipped, fmt.Sprintf("no open release PR %s -> %s", releaseBranch, to)
 	}
 
 	output, err := runner.Run(repoPath, "gh", "pr", "merge", strings.TrimSpace(number), "--merge")
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+		return ActionFailed, err.Error()
 	}
-	return Result{RepoPath: repoPath, Action: ActionDone, Message: firstLine(output, "merged release PR with merge commit")}
+	return ActionDone, firstLine(output, fmt.Sprintf("merged %s -> %s", releaseBranch, to))
 }
 
 func (s *Summary) Add(result Result) {
