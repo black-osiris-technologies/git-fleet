@@ -1,9 +1,15 @@
 name: Release
 
+# Publishes git-fleet's own binaries to a GitHub Release. Run it manually from
+# the Actions tab ("Run workflow") and enter the version; the job creates the
+# tag and GoReleaser builds and uploads the artifacts. No tag is pushed by hand.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.3.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,10 +21,26 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Validate version
+        run: |
+          if ! printf '%s' "${{ inputs.version }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "version must look like v1.2.3 (got '${{ inputs.version }}')" >&2
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ inputs.version }}" -m "Release ${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
       - uses: actions/setup-go@v6
         with:
           go-version: "1.22.x"
           cache: true
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser

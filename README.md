@@ -166,6 +166,14 @@ Behavior worth knowing:
 - **`release-tag` advances by design** — re-running cuts the next patch. Use
   `--dry-run` to confirm the target before pushing.
 
+> **Note.** In a CI-driven release flow where a pipeline (for example Jenkins)
+> owns tagging — building the production artifact, running tests and
+> integrations, and tagging the validated commit so a single immutable artifact
+> is promoted across environments — that pipeline stays canonical for tags.
+> `release-tag` is then optional: use it for repositories without such a
+> pipeline, or for ad-hoc tagging. `release-start`, `release-pr`, and
+> `release-finish` complement a Jenkins-style flow without touching tags.
+
 ### Finishing a release
 
 `release-finish` completes a GitFlow release by merging the release branch into
