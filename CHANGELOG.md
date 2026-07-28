@@ -25,6 +25,13 @@ All notable changes are documented in this file. The project follows [Semantic V
   merges succeed. The permanent branch names are configurable with `--master`
   and `--develop`.
 
+- `--json` flag on every command that emits a structured JSON document instead of
+  tab-separated text (`{"results":[…],"summary":{…}}`, or `{"repos":[…]}` for `scan`),
+  making the output reliable to parse in automation.
+- `--jobs` flag on `status`, `sync`, and the `release-*` commands that processes
+  repositories in parallel (default 8) while keeping output in a stable, path-sorted
+  order. Use `--jobs 1` for sequential processing.
+
 ### Changed
 
 - Refactored the single-target release merge into a shared helper reused by

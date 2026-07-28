@@ -14,7 +14,7 @@ Git Fleet scans a directory of local repositories, explains what it would change
 - **Safety first:** dirty repositories are skipped and risky operations are explicit.
 - **Plan before execution:** use `--dry-run` to inspect every intended command.
 - **GitFlow aware:** resolve `develop`, `master`, `main`, or the latest release branch.
-- **Automation friendly:** stable exit behavior and focused commands for scripts and CI.
+- **Automation friendly:** `--json` output, `--jobs` parallelism, stable exit behavior, and focused commands for scripts and CI.
 - **Cross-platform:** a single Go binary with no runtime dependencies.
 
 ## Quick Start
@@ -154,6 +154,22 @@ Behavior worth knowing:
   deleted.
 
 Run `git-fleet <command> --help` for command-specific options.
+
+### Automation and scale
+
+- **`--json`** switches any command to a structured JSON document (`{"results":[…],"summary":{…}}`,
+  or `{"repos":[…]}` for `scan`) instead of tab-separated text, so output can be parsed
+  reliably in CI:
+
+  ```bash
+  git-fleet status --root ~/code --json
+  git-fleet release-start --root ~/code --dry-run --json
+  ```
+
+- **`--jobs N`** processes repositories in parallel (default 8) for `status`, `sync`, and
+  the `release-*` commands. Repositories are independent working trees, so their git
+  operations run concurrently; output stays in a stable, path-sorted order regardless of
+  completion order. Use `--jobs 1` to force sequential processing.
 
 ## Safety Model
 
