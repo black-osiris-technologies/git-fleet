@@ -17,13 +17,56 @@ Git Fleet scans a directory of local repositories, explains what it would change
 - **Automation friendly:** `--json` output, `--jobs` parallelism, stable exit behavior, and focused commands for scripts and CI.
 - **Cross-platform:** a single Go binary with no runtime dependencies.
 
-## Quick Start
+## Install
 
-Requirements: Git and Go 1.22 or newer.
+Git Fleet ships as a single binary with no runtime dependencies. Only Git is
+required to *use* it; Go is only needed if you build from source.
+
+**Linux / macOS — install script**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/black-osiris-technologies/git-fleet/master/scripts/install.sh | sh
+```
+
+Installs to `/usr/local/bin` (falling back to `~/.local/bin`). Pin a version or
+change the directory with `GIT_FLEET_VERSION` and `GIT_FLEET_INSTALL_DIR`.
+
+**Windows — install script (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/black-osiris-technologies/git-fleet/master/scripts/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\git-fleet\bin` and adds it to your user `PATH`.
+
+**Download a binary manually**
+
+Grab the archive for your OS/arch from the [latest release](https://github.com/black-osiris-technologies/git-fleet/releases/latest),
+extract it, and move `git-fleet` onto your `PATH`. Checksums are published as
+`checksums.txt`.
+
+**Linux packages**
+
+`.deb` and `.rpm` packages are attached to each release:
+
+```bash
+sudo dpkg -i git-fleet_*_linux_amd64.deb   # Debian/Ubuntu
+sudo rpm -i  git-fleet_*_linux_amd64.rpm   # Fedora/RHEL
+```
+
+**From source (requires Go 1.22+)**
 
 ```bash
 go install github.com/black-osiris-technologies/git-fleet/cmd/git-fleet@latest
+```
 
+Note that `go install` places the binary in `$(go env GOPATH)/bin`, which may
+not be on your `PATH`. The install scripts above avoid that.
+
+## Quick Start
+
+```bash
+git-fleet version
 git-fleet scan --root ~/code
 git-fleet status --root ~/code
 git-fleet sync --root ~/code --target develop --dry-run
@@ -47,6 +90,7 @@ git-fleet sync --root ~/code --target develop
 | `release-pr` | Create release promotion pull requests using explicit source and target branches. |
 | `release-merge` | Merge a release pull request with a normal merge commit. |
 | `release-finish` | Merge a release into both `master` and `develop`, then optionally delete the branch. |
+| `version` | Print the installed version, commit, and build date. |
 
 Examples:
 

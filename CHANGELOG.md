@@ -32,10 +32,21 @@ All notable changes are documented in this file. The project follows [Semantic V
   repositories in parallel (default 8) while keeping output in a stable, path-sorted
   order. Use `--jobs 1` for sequential processing.
 
+- Cross-platform distribution: a GoReleaser configuration and tag-triggered
+  release workflow that publish binaries for Linux, macOS, and Windows
+  (amd64 and arm64), archives, `checksums.txt`, and `.deb`/`.rpm` packages to
+  a GitHub Release. Install scripts (`scripts/install.sh`, `scripts/install.ps1`)
+  download the right binary without a Go toolchain, and the Windows script adds
+  the install directory to the user `PATH`.
+- `version` command that prints the version, commit, and build date stamped into
+  released binaries.
+
 ### Changed
 
 - Refactored the single-target release merge into a shared helper reused by
   `release-merge` and `release-finish`.
+- Documented binary, install-script, and Linux-package installation as the
+  primary paths; `go install` is now presented as a from-source option.
 
 ## [0.2.1] - 2026-07-12
 

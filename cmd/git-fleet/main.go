@@ -19,6 +19,14 @@ import (
 // git operations run safely in parallel.
 const defaultJobs = 8
 
+// Build metadata, stamped at release time via -ldflags. Defaults keep local
+// builds honest about being unversioned.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -49,6 +57,9 @@ func run(args []string) error {
 		return runReleaseMerge(args[1:])
 	case "release-finish":
 		return runReleaseFinish(args[1:])
+	case "version", "--version", "-v":
+		fmt.Printf("git-fleet %s (commit %s, built %s)\n", version, commit, date)
+		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -422,6 +433,7 @@ func printUsage() {
 	fmt.Println("  release-pr     Plan or create release pull requests")
 	fmt.Println("  release-merge  Plan or merge release pull requests with merge commits")
 	fmt.Println("  release-finish Plan or merge a release into master and develop, then optionally delete it")
+	fmt.Println("  version Print the git-fleet version")
 	fmt.Println()
 	fmt.Println("Common options: --json (machine-readable output), --jobs N (parallelism)")
 }
