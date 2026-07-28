@@ -11,6 +11,12 @@ All notable changes are documented in this file. The project follows [Semantic V
   tag (minor bump by default, `--major` for the next major line), the branch name
   is configurable with `--branch-format`, and the operation is idempotent: a
   repository whose target branch already exists is skipped rather than recreated.
+- `release-tag` command that cuts and pushes the next patch tag on a release line
+  across the fleet. The patch number advances continuously per `MAJOR.MINOR` line
+  (tags on other lines are ignored), the annotated tag is created on the
+  authoritative `origin/<release-branch>` tip after a pruning fetch, the tag name
+  is configurable with `--tag-format`, and `--version` pins an exact patch on the
+  resolved line.
 
 ## [0.2.1] - 2026-07-12
 

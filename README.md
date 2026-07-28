@@ -43,6 +43,7 @@ git-fleet sync --root ~/code --target develop
 | `status` | Report branch and working-tree state for every repository. |
 | `sync` | Fetch, switch, and fast-forward clean repositories to a target branch. |
 | `release-start` | Cut the next release branch from `origin/develop`, deriving the version from the latest tag. |
+| `release-tag` | Cut and push the next patch tag on a release line (`v2.4.0`, `v2.4.1`, …). |
 | `release-pr` | Create release promotion pull requests using explicit source and target branches. |
 | `release-merge` | Merge a release pull request with a normal merge commit. |
 
@@ -88,6 +89,37 @@ Behavior worth knowing:
 - **Branch name is configurable** with `--branch-format` using `{major}`, `{minor}`,
   and `{patch}` (default `release-{major}.{minor}`).
 
+### Tagging a release line
+
+`release-tag` cuts the next patch tag on a release line and pushes it. Tags are
+the immutable artifacts promoted through environments, so each stabilization
+iteration cuts the next patch:
+
+```bash
+# On the release-2.4 line: v2.4.0 first, then v2.4.1, v2.4.2, ...
+git-fleet release-tag --root ~/code --dry-run
+git-fleet release-tag --root ~/code
+
+# Target a specific release line rather than the latest.
+git-fleet release-tag --root ~/code --from release-2.4
+
+# Pin an exact version (must be on the resolved line).
+git-fleet release-tag --root ~/code --version 2.4.3
+```
+
+Behavior worth knowing:
+
+- **Continuous patch sequence.** The highest existing patch on the `MAJOR.MINOR`
+  line is advanced by one (or `.0` when the line has no tags yet); tags on other
+  lines never affect the sequence.
+- **Tags the authoritative tip.** The tag is created on `origin/<release-branch>`
+  after a pruning fetch, so a stabilized commit is promoted, never a stale local one.
+- **Annotated tags** named `v{major}.{minor}.{patch}` by default (`--tag-format` to
+  change), with an optional `--message`. A repository without a release branch on
+  origin is skipped.
+- **`release-tag` advances by design** — re-running cuts the next patch. Use
+  `--dry-run` to confirm the target before pushing.
+
 Run `git-fleet <command> --help` for command-specific options.
 
 ## Safety Model
@@ -97,6 +129,7 @@ Git Fleet intentionally favors a stopped operation over an ambiguous mutation.
 - Dirty repositories are skipped by default.
 - Sync uses `fetch --prune` and `pull --ff-only`.
 - `release-start` creates a branch without checking it out and skips any repository whose target branch already exists, so it never overwrites work or leaves repositories on a new branch.
+- `release-tag` tags the fetched `origin` tip of a release branch and refuses to recreate a tag that already exists, so tags stay immutable.
 - Destructive resets, bulk commits, bulk pushes, and automatic branch deletion are out of scope.
 - Release promotions preserve merge history; squash release merges are rejected.
 - Dry-run output is available for operations that can change repository state.
@@ -105,7 +138,7 @@ Always keep independent backups for important work. A coordination tool cannot r
 
 ## Project Status
 
-Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, release branch creation, and GitFlow release pull requests. Interfaces may evolve before v1.0.
+Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, release branch creation, release tagging, and GitFlow release pull requests. Interfaces may evolve before v1.0.
 
 See [CHANGELOG.md](CHANGELOG.md) for shipped changes and the [issue tracker](https://github.com/black-osiris-technologies/git-fleet/issues) for planned work.
 

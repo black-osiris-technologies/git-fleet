@@ -33,6 +33,8 @@ func run(args []string) error {
 		return runSync(args[1:])
 	case "release-start":
 		return runReleaseStart(args[1:])
+	case "release-tag":
+		return runReleaseTag(args[1:])
 	case "release-pr":
 		return runReleasePR(args[1:])
 	case "release-merge":
@@ -151,6 +153,43 @@ func runReleaseStart(args []string) error {
 	return nil
 }
 
+func runReleaseTag(args []string) error {
+	fs := flag.NewFlagSet("release-tag", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	from := fs.String("from", "latest-release", "release branch: explicit branch name or latest-release")
+	tagFormat := fs.String("tag-format", releaseflow.DefaultTagFormat, "tag name template using {major}, {minor}, {patch}")
+	version := fs.String("version", "", "explicit MAJOR.MINOR.PATCH to tag instead of the next patch on the line")
+	message := fs.String("message", "", "annotation message; defaults to \"Release <tag>\"")
+	dryRun := fs.Bool("dry-run", false, "show the release-tag plan without creating tags")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := releaseflow.TagOptions{
+		From:            *from,
+		TagFormat:       *tagFormat,
+		Message:         *message,
+		ExplicitVersion: *version,
+	}
+
+	repos, err := repo.Discover(*root)
+	if err != nil {
+		return err
+	}
+
+	summary := releaseflow.Summary{}
+	for _, r := range repos {
+		result := releaseflow.PlanTag(r.Path, opts)
+		if !*dryRun {
+			result = releaseflow.CreateTag(r.Path, opts, releaseflow.RealRunner{})
+		}
+		summary.Add(result)
+		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
+	}
+	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
 func runReleasePR(args []string) error {
 	fs := flag.NewFlagSet("release-pr", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
@@ -226,6 +265,7 @@ func printUsage() {
 	fmt.Println("  status  Show branch and dirty state")
 	fmt.Println("  sync    Plan or execute safe repository synchronization")
 	fmt.Println("  release-start  Plan or create the next release branch from origin/develop")
+	fmt.Println("  release-tag    Plan or cut the next patch tag on a release line")
 	fmt.Println("  release-pr     Plan or create release pull requests")
 	fmt.Println("  release-merge  Plan or merge release pull requests with merge commits")
 }
