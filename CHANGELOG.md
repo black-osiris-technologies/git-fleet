@@ -4,6 +4,14 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- `release-start` command that cuts the next release branch from `origin/develop`
+  across the fleet. The version is derived per repository from its highest stable
+  tag (minor bump by default, `--major` for the next major line), the branch name
+  is configurable with `--branch-format`, and the operation is idempotent: a
+  repository whose target branch already exists is skipped rather than recreated.
+
 ## [0.2.1] - 2026-07-12
 
 ### Fixed
