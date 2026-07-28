@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes git-fleet's own binaries to a GitHub Release when a vX.Y.Z tag is
+# pushed to this repository:
+#
+#   git tag v0.3.0 && git push origin v0.3.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          # Pinned to the version the .goreleaser.yaml schema was validated against.
+          # Bump deliberately after re-running `goreleaser check` locally.
+          version: "2.5.1"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
