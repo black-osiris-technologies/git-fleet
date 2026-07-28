@@ -12,3 +12,6 @@ coverage.out
 # OS
 Thumbs.db
 .DS_Store
+
+# Built CLI binary
+/git-fleet
