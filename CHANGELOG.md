@@ -17,6 +17,18 @@ All notable changes are documented in this file. The project follows [Semantic V
   authoritative `origin/<release-branch>` tip after a pruning fetch, the tag name
   is configurable with `--tag-format`, and `--version` pins an exact patch on the
   resolved line.
+- `release-finish` command that completes a GitFlow release across the fleet by
+  merging the release branch into both `master` and `develop` with merge commits
+  (never squash), through the existing open pull requests so review and branch
+  protection are honored. A target with no open PR is skipped rather than failed,
+  and `--delete-branch` removes the release branch on origin only after both
+  merges succeed. The permanent branch names are configurable with `--master`
+  and `--develop`.
+
+### Changed
+
+- Refactored the single-target release merge into a shared helper reused by
+  `release-merge` and `release-finish`.
 
 ## [0.2.1] - 2026-07-12
 

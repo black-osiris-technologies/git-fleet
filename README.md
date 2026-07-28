@@ -46,6 +46,7 @@ git-fleet sync --root ~/code --target develop
 | `release-tag` | Cut and push the next patch tag on a release line (`v2.4.0`, `v2.4.1`, …). |
 | `release-pr` | Create release promotion pull requests using explicit source and target branches. |
 | `release-merge` | Merge a release pull request with a normal merge commit. |
+| `release-finish` | Merge a release into both `master` and `develop`, then optionally delete the branch. |
 
 Examples:
 
@@ -54,6 +55,7 @@ git-fleet sync --root . --target develop --dry-run
 git-fleet release-start --root . --dry-run
 git-fleet release-pr --root . --from latest-release --to master --dry-run
 git-fleet release-merge --root . --from latest-release --to master --merge-method merge --dry-run
+git-fleet release-finish --root . --from latest-release --dry-run
 ```
 
 ### Starting the next release line
@@ -120,6 +122,37 @@ Behavior worth knowing:
 - **`release-tag` advances by design** — re-running cuts the next patch. Use
   `--dry-run` to confirm the target before pushing.
 
+### Finishing a release
+
+`release-finish` completes a GitFlow release by merging the release branch into
+**both** the production and integration branches with merge commits, preserving
+release history on both lines:
+
+```bash
+# Merge the open release PRs into master and develop (never squash).
+git-fleet release-finish --root ~/code --dry-run
+git-fleet release-finish --root ~/code
+
+# Also delete the release branch on origin once both merges land.
+git-fleet release-finish --root ~/code --delete-branch
+
+# Non-default permanent branch names.
+git-fleet release-finish --root ~/code --master main --develop develop
+```
+
+Behavior worth knowing:
+
+- **Both permanent branches.** The release is merged into `master` and `develop`
+  (configurable with `--master`/`--develop`), so neither line misses the release.
+- **Through pull requests.** It merges the existing open release PRs (create them
+  with `release-pr --to master` and `release-pr --to develop`), so branch
+  protection and review are honored; it never merges locally.
+- **Safe to re-run.** A branch with no open PR into a target is reported as
+  skipped rather than failed, so a partially completed finish can be repeated.
+- **Deletion is guarded.** `--delete-branch` removes the release branch on origin
+  only after both merges succeed in the same run, so an unmerged branch is never
+  deleted.
+
 Run `git-fleet <command> --help` for command-specific options.
 
 ## Safety Model
@@ -132,13 +165,14 @@ Git Fleet intentionally favors a stopped operation over an ambiguous mutation.
 - `release-tag` tags the fetched `origin` tip of a release branch and refuses to recreate a tag that already exists, so tags stay immutable.
 - Destructive resets, bulk commits, bulk pushes, and automatic branch deletion are out of scope.
 - Release promotions preserve merge history; squash release merges are rejected.
+- `release-finish` merges through pull requests into both permanent branches and deletes a release branch only after both merges succeed, so it never bypasses review or removes unmerged work.
 - Dry-run output is available for operations that can change repository state.
 
 Always keep independent backups for important work. A coordination tool cannot replace repository access controls or a recovery plan.
 
 ## Project Status
 
-Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, release branch creation, release tagging, and GitFlow release pull requests. Interfaces may evolve before v1.0.
+Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, release branch creation, release tagging, and GitFlow release pull requests including finishing a release into both permanent branches. Interfaces may evolve before v1.0.
 
 See [CHANGELOG.md](CHANGELOG.md) for shipped changes and the [issue tracker](https://github.com/black-osiris-technologies/git-fleet/issues) for planned work.
 

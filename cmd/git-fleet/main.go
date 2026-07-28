@@ -39,6 +39,8 @@ func run(args []string) error {
 		return runReleasePR(args[1:])
 	case "release-merge":
 		return runReleaseMerge(args[1:])
+	case "release-finish":
+		return runReleaseFinish(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -250,6 +252,43 @@ func runReleaseMerge(args []string) error {
 	return nil
 }
 
+func runReleaseFinish(args []string) error {
+	fs := flag.NewFlagSet("release-finish", flag.ContinueOnError)
+	root := fs.String("root", ".", "root directory to scan")
+	from := fs.String("from", "latest-release", "release branch: explicit branch name or latest-release")
+	master := fs.String("master", "master", "production branch to merge the release into")
+	develop := fs.String("develop", "develop", "integration branch to merge the release into")
+	deleteBranch := fs.Bool("delete-branch", false, "delete the release branch on origin after both merges succeed")
+	dryRun := fs.Bool("dry-run", false, "show the release-finish plan without merging or deleting")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := releaseflow.FinishOptions{
+		From:          *from,
+		MasterBranch:  *master,
+		DevelopBranch: *develop,
+		DeleteBranch:  *deleteBranch,
+	}
+
+	repos, err := repo.Discover(*root)
+	if err != nil {
+		return err
+	}
+
+	summary := releaseflow.Summary{}
+	for _, r := range repos {
+		result := releaseflow.PlanFinish(r.Path, opts)
+		if !*dryRun {
+			result = releaseflow.FinishRelease(r.Path, opts, releaseflow.RealRunner{})
+		}
+		summary.Add(result)
+		fmt.Printf("%s\t%s\t%s\n", result.RepoPath, result.Action, result.Message)
+	}
+	fmt.Printf("summary\ttotal=%d\tplanned=%d\tdone=%d\tskipped=%d\tfailed=%d\n", summary.Total, summary.Planned, summary.Done, summary.Skipped, summary.Failed)
+	return nil
+}
+
 func cleanLabel(dirty bool) string {
 	if dirty {
 		return "dirty"
@@ -268,4 +307,5 @@ func printUsage() {
 	fmt.Println("  release-tag    Plan or cut the next patch tag on a release line")
 	fmt.Println("  release-pr     Plan or create release pull requests")
 	fmt.Println("  release-merge  Plan or merge release pull requests with merge commits")
+	fmt.Println("  release-finish Plan or merge a release into master and develop, then optionally delete it")
 }
