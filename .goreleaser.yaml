@@ -28,7 +28,7 @@ archives:
     name_template: "git-fleet_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        formats: [zip]
+        format: zip
     files:
       - README.md
       - LICENSE

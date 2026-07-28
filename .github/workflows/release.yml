@@ -22,7 +22,9 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Pinned to the version the .goreleaser.yaml schema was validated against.
+          # Bump deliberately after re-running `goreleaser check` locally.
+          version: "2.5.1"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
