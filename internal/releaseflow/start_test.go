@@ -136,6 +136,10 @@ func createStartRepo(t *testing.T, tags, branches []string) (clone string, remot
 	}
 
 	runGit(t, root, "clone", remote, clone)
+	// Annotated tags (release-tag) need a committer identity; a clean CI runner
+	// has none globally, so configure it locally on the clone.
+	runGit(t, clone, "config", "user.email", "test@example.com")
+	runGit(t, clone, "config", "user.name", "Test User")
 	return clone, remote
 }
 
