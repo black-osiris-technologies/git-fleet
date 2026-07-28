@@ -1,0 +1,66 @@
+# GoReleaser builds cross-platform binaries, archives, checksums, and Linux
+# packages, and publishes them to a GitHub Release on every vX.Y.Z tag.
+# Validate locally with `goreleaser check` and dry-run with
+# `goreleaser release --snapshot --clean`.
+version: 2
+
+builds:
+  - id: git-fleet
+    main: ./cmd/git-fleet
+    binary: git-fleet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    name_template: "git-fleet_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+
+nfpms:
+  - id: linux-packages
+    package_name: git-fleet
+    formats:
+      - deb
+      - rpm
+    maintainer: Black Osiris Technologies
+    description: Safe, repeatable Git operations across every repository in your workspace.
+    license: MIT
+    homepage: https://github.com/black-osiris-technologies/git-fleet
+    bindir: /usr/bin
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: black-osiris-technologies
+    name: git-fleet
+  draft: false
+  prerelease: auto
