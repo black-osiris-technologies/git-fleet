@@ -4,6 +4,13 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-28
+
+### Fixed
+
+- `release-tag` tests configure a git identity on the test clone so they
+  pass on a clean CI runner (no functional change to the binary).
+
 ## [0.3.0] - 2026-07-28
 
 ### Added
@@ -71,7 +78,8 @@ All notable changes are documented in this file. The project follows [Semantic V
 - Guarded synchronization with dry-run planning.
 - GitFlow release pull request and merge commands.
 
-[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.1.0...v0.2.0
