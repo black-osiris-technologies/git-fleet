@@ -33,12 +33,19 @@ func Resolve(target string, branches repo.Branches) (Resolution, error) {
 }
 
 func resolveExplicit(target string, branches repo.Branches) (Resolution, error) {
-	if contains(branches.Local, target) {
-		return Resolution{Target: target, LocalBranch: target, Source: "local"}, nil
+	remoteRef := "origin/" + target
+	localExists := contains(branches.Local, target)
+	remoteExists := contains(branches.Remote, remoteRef)
+
+	if localExists {
+		resolution := Resolution{Target: target, LocalBranch: target, Source: "local"}
+		if remoteExists {
+			resolution.RemoteRef = remoteRef
+		}
+		return resolution, nil
 	}
 
-	remoteRef := "origin/" + target
-	if contains(branches.Remote, remoteRef) {
+	if remoteExists {
 		return Resolution{Target: target, LocalBranch: target, RemoteRef: remoteRef, Source: "remote"}, nil
 	}
 

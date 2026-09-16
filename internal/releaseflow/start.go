@@ -3,6 +3,7 @@ package releaseflow
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,11 @@ const DefaultBranchFormat = "release-{major}.{minor}"
 
 // DefaultBaseBranch is the integration branch a release line is cut from.
 const DefaultBaseBranch = "develop"
+
+// releaseBranchNamePattern is the canonical family understood by automatic
+// release selection and release-tag. Custom branch formats must stay inside
+// this family or a branch created by release-start could not be resolved later.
+var releaseBranchNamePattern = regexp.MustCompile(`^release[-/]\d+\.\d+(?:\.\d+)*$`)
 
 // errNoTags signals that a repository has no eligible stable tag to derive the
 // next version from. It maps to a skip, not a failure: the repository simply has
@@ -133,7 +139,16 @@ func resolveTarget(repoPath string, opts StartOptions) (branchName string, basis
 	if err != nil {
 		return "", "", err
 	}
-	return formatBranch(opts.BranchFormat, version), basis, nil
+
+	branchName = formatBranch(opts.BranchFormat, version)
+	if !releaseBranchNamePattern.MatchString(branchName) {
+		return "", "", fmt.Errorf(
+			"branch format %q produces incompatible release branch %q; expected release-X.Y[...] or release/X.Y[...] so automatic release commands can resolve it",
+			opts.BranchFormat,
+			branchName,
+		)
+	}
+	return branchName, basis, nil
 }
 
 func resolveVersion(repoPath string, opts StartOptions) (semver.Version, string, error) {

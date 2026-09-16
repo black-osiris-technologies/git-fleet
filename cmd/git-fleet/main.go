@@ -130,8 +130,21 @@ func runStatus(args []string) error {
 		lines[index] = statusLine{Repo: path, Branch: status.Branch, Dirty: status.Dirty}
 	})
 
+	failed := 0
+	for _, line := range lines {
+		if line.Error != "" {
+			failed++
+		}
+	}
+
 	if *jsonOut {
-		return encodeJSON(map[string]any{"results": lines})
+		if err := encodeJSON(map[string]any{"results": lines}); err != nil {
+			return err
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d repository status operation(s) failed", failed)
+		}
+		return nil
 	}
 	for _, line := range lines {
 		if line.Error != "" {
@@ -140,13 +153,16 @@ func runStatus(args []string) error {
 		}
 		fmt.Printf("%s\t%s\t%s\n", line.Repo, line.Branch, cleanLabel(line.Dirty))
 	}
+	if failed > 0 {
+		return fmt.Errorf("%d repository status operation(s) failed", failed)
+	}
 	return nil
 }
 
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
-	target := fs.String("target", "develop", "target branch: develop, master, main, or latest-release")
+	target := fs.String("target", "develop", "target branch: explicit branch, latest-release, or previous-release")
 	dryRun := fs.Bool("dry-run", false, "show the sync plan without changing repositories")
 	jobs := fs.Int("jobs", defaultJobs, "number of repositories to process in parallel")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON instead of text")
@@ -176,7 +192,7 @@ func runReleaseStart(args []string) error {
 	root := fs.String("root", ".", "root directory to scan")
 	major := fs.Bool("major", false, "start the next major line (default is the next minor line)")
 	version := fs.String("version", "", "explicit MAJOR.MINOR[.PATCH] version; required for repositories with no release tags")
-	branchFormat := fs.String("branch-format", releaseflow.DefaultBranchFormat, "branch name template using {major}, {minor}, {patch}")
+	branchFormat := fs.String("branch-format", releaseflow.DefaultBranchFormat, "compatible release branch template: release-X.Y[...] or release/X.Y[...]")
 	base := fs.String("base", releaseflow.DefaultBaseBranch, "integration branch to cut the release line from")
 	dryRun := fs.Bool("dry-run", false, "show the release-start plan without creating branches")
 	jobs := fs.Int("jobs", defaultJobs, "number of repositories to process in parallel")
@@ -215,8 +231,8 @@ func runReleaseStart(args []string) error {
 func runReleaseTag(args []string) error {
 	fs := flag.NewFlagSet("release-tag", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
-	from := fs.String("from", "latest-release", "release branch: explicit branch name or latest-release")
-	tagFormat := fs.String("tag-format", releaseflow.DefaultTagFormat, "tag name template using {major}, {minor}, {patch}")
+	from := fs.String("from", "latest-release", "release branch: explicit branch, latest-release, or previous-release")
+	tagFormat := fs.String("tag-format", releaseflow.DefaultTagFormat, "stable SemVer tag template: v{major}.{minor}.{patch} or {major}.{minor}.{patch}")
 	version := fs.String("version", "", "explicit MAJOR.MINOR.PATCH to tag instead of the next patch on the line")
 	message := fs.String("message", "", "annotation message; defaults to \"Release <tag>\"")
 	dryRun := fs.Bool("dry-run", false, "show the release-tag plan without creating tags")
@@ -253,7 +269,7 @@ func runReleaseTag(args []string) error {
 func runReleasePR(args []string) error {
 	fs := flag.NewFlagSet("release-pr", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
-	from := fs.String("from", "latest-release", "source branch: explicit branch name or latest-release")
+	from := fs.String("from", "latest-release", "source branch: explicit branch, latest-release, or previous-release")
 	to := fs.String("to", "master", "target branch, usually master or develop")
 	dryRun := fs.Bool("dry-run", false, "show the release PR plan without creating pull requests")
 	jobs := fs.Int("jobs", defaultJobs, "number of repositories to process in parallel")
@@ -282,7 +298,7 @@ func runReleasePR(args []string) error {
 func runReleaseMerge(args []string) error {
 	fs := flag.NewFlagSet("release-merge", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
-	from := fs.String("from", "latest-release", "source branch: explicit branch name or latest-release")
+	from := fs.String("from", "latest-release", "source branch: explicit branch, latest-release, or previous-release")
 	to := fs.String("to", "master", "target branch, usually master or develop")
 	mergeMethod := fs.String("merge-method", "merge", "GitHub merge method; only merge is supported")
 	dryRun := fs.Bool("dry-run", false, "show the release merge plan without merging pull requests")
@@ -315,7 +331,7 @@ func runReleaseMerge(args []string) error {
 func runReleaseFinish(args []string) error {
 	fs := flag.NewFlagSet("release-finish", flag.ContinueOnError)
 	root := fs.String("root", ".", "root directory to scan")
-	from := fs.String("from", "latest-release", "release branch: explicit branch name or latest-release")
+	from := fs.String("from", "latest-release", "release branch: explicit branch, latest-release, or previous-release")
 	master := fs.String("master", "master", "production branch to merge the release into")
 	develop := fs.String("develop", "develop", "integration branch to merge the release into")
 	deleteBranch := fs.Bool("delete-branch", false, "delete the release branch on origin after both merges succeed")
@@ -376,15 +392,23 @@ func toRepoLine(result releaseflow.Result) repoLine {
 }
 
 // renderActionReport prints the per-repository lines and a summary, either as
-// tab-separated text or as JSON. labels are the summary counters to report, in
-// order, matching the possible action values (lowercased).
+// tab-separated text or as JSON. A FAILED repository still appears in the full
+// report, then causes a non-zero process exit through the returned error.
 func renderActionReport(jsonOut bool, lines []repoLine, labels []string) error {
+	failed := countAction(lines, "failed")
+
 	if jsonOut {
 		summary := map[string]int{"total": len(lines)}
 		for _, label := range labels {
 			summary[label] = countAction(lines, label)
 		}
-		return encodeJSON(map[string]any{"results": lines, "summary": summary})
+		if err := encodeJSON(map[string]any{"results": lines, "summary": summary}); err != nil {
+			return err
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d repository operation(s) failed", failed)
+		}
+		return nil
 	}
 
 	for _, line := range lines {
@@ -395,6 +419,9 @@ func renderActionReport(jsonOut bool, lines []repoLine, labels []string) error {
 		fmt.Printf("\t%s=%d", label, countAction(lines, label))
 	}
 	fmt.Println()
+	if failed > 0 {
+		return fmt.Errorf("%d repository operation(s) failed", failed)
+	}
 	return nil
 }
 

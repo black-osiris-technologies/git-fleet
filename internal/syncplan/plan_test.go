@@ -35,6 +35,56 @@ func TestExecuteSyncsCleanRepository(t *testing.T) {
 	}
 }
 
+func TestExecuteSyncsLocalBranchWithoutUpstreamFromOrigin(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	clone := filepath.Join(root, "clone")
+
+	initRemoteAndSeed(t, root, remote, seed)
+	runGit(t, seed, "branch", "release-2.4", "develop")
+	runGit(t, seed, "push", "origin", "release-2.4")
+	runGit(t, root, "clone", remote, clone)
+	// Create the local branch deliberately without tracking configuration.
+	runGit(t, clone, "branch", "--no-track", "release-2.4", "origin/release-2.4")
+
+	plan := Execute(clone, "latest-release")
+	if plan.Action != ActionDone {
+		t.Fatalf("Execute() = %#v, want DONE without relying on local upstream config", plan)
+	}
+	if got := runGitOutput(t, clone, "rev-parse", "HEAD"); got != runGitOutput(t, clone, "rev-parse", "origin/release-2.4") {
+		t.Fatalf("HEAD = %s, want origin/release-2.4", got)
+	}
+}
+
+func TestPlanLatestReleaseReadsLiveOrigin(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	clone := filepath.Join(root, "clone")
+
+	initRemoteAndSeed(t, root, remote, seed)
+	runGit(t, seed, "branch", "release-2.3", "develop")
+	runGit(t, seed, "branch", "release-2.4", "develop")
+	runGit(t, seed, "push", "origin", "release-2.3", "release-2.4")
+	runGit(t, root, "clone", remote, clone)
+
+	// Delete the higher release directly in the bare remote. The clone keeps its
+	// stale origin/release-2.4 remote-tracking ref until a fetch occurs.
+	runGit(t, root, "--git-dir", remote, "branch", "-D", "release-2.4")
+	if got := runGitOutput(t, clone, "branch", "-r", "--list", "origin/release-2.4"); got == "" {
+		t.Fatal("test setup lost stale origin/release-2.4 tracking ref")
+	}
+
+	plan := Plan(clone, "latest-release")
+	if plan.Action != ActionReady {
+		t.Fatalf("Plan() = %#v, want READY", plan)
+	}
+	if !strings.Contains(plan.Message, "release-2.3") || strings.Contains(plan.Message, "release-2.4") {
+		t.Fatalf("Plan() message = %q, want live origin release-2.3", plan.Message)
+	}
+}
+
 func TestExecutePrunesLocalTagDeletedFromOrigin(t *testing.T) {
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
