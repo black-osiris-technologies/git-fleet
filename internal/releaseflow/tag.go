@@ -10,7 +10,7 @@ import (
 	"github.com/black-osiris-technologies/git-fleet/internal/semver"
 )
 
-// DefaultTagFormat is the tag naming git-fleet uses when the caller does not
+// DefaultTagFormat is the naming git-fleet uses when the caller does not
 // override it. It yields names such as "v2.4.0".
 const DefaultTagFormat = "v{major}.{minor}.{patch}"
 
@@ -20,9 +20,12 @@ var releaseLinePattern = regexp.MustCompile(`^release[-/](\d+)\.(\d+)`)
 
 // TagOptions configures a single-repository release-tag computation.
 type TagOptions struct {
-	// From selects the release branch: an explicit name or "latest-release".
+	// From selects the release branch: an explicit name, "latest-release", or
+	// "previous-release".
 	From string
-	// TagFormat templates the tag name using {major}, {minor}, {patch}.
+	// TagFormat templates the tag name using {major}, {minor}, {patch}. To remain
+	// compatible with release-start, only stable SemVer tags with optional "v"
+	// prefix are supported.
 	TagFormat string
 	// Message is the annotation message; when empty a default is used.
 	Message string
@@ -41,10 +44,24 @@ func (o TagOptions) withDefaults() TagOptions {
 	return o
 }
 
-// PlanTag reports what CreateTag would do using the repository's current local
-// state. It performs no fetch and mutates nothing.
+func validateTagFormat(format string) error {
+	if format == "v{major}.{minor}.{patch}" || format == "{major}.{minor}.{patch}" {
+		return nil
+	}
+	return fmt.Errorf(
+		"tag format %q is incompatible with release version discovery; use v{major}.{minor}.{patch} or {major}.{minor}.{patch}",
+		format,
+	)
+}
+
+// PlanTag reports what CreateTag would do using origin as the source of truth.
+// It reads branches and tags with ls-remote, so dry-run does not mutate local
+// refs and cannot be influenced by stale local tags or remote-tracking branches.
 func PlanTag(repoPath string, opts TagOptions) Result {
 	opts = opts.withDefaults()
+	if err := validateTagFormat(opts.TagFormat); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 
 	tagName, ref, err := resolveTag(repoPath, opts)
 	if err != nil {
@@ -58,17 +75,19 @@ func PlanTag(repoPath string, opts TagOptions) Result {
 }
 
 // CreateTag cuts the next patch tag on a repository's release line and pushes it.
-// It refreshes tags with a pruning fetch, tags the authoritative origin tip of
-// the release branch (so a stabilized commit is promoted, never a stale local
-// one), and is idempotent for an explicitly pinned version: a tag that already
-// exists is reported as skipped rather than recreated.
+// It prunes stale local tags, derives the patch sequence from tags currently on
+// origin, and tags the fetched origin tip of the release branch. An explicitly
+// pinned version that already exists on origin is reported as skipped.
 func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 	opts = opts.withDefaults()
+	if err := validateTagFormat(opts.TagFormat); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
-	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--tags"); err != nil {
+	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--prune-tags", "--tags"); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
@@ -95,31 +114,31 @@ func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 	}
 }
 
-// resolveTag determines the tag name to create and the origin ref to tag. It
-// returns an error (mapped to a skip by callers) when there is no release
-// branch on origin, the line cannot be parsed, or the computed tag already
-// exists.
+// resolveTag determines the tag name to create and the fetched origin ref to tag.
+// Branch and tag discovery is performed directly against origin so stale local
+// state cannot affect release selection or patch sequencing.
 func resolveTag(repoPath string, opts TagOptions) (tagName string, ref string, err error) {
-	branches, err := repo.ListBranches(repoPath)
+	originBranches, err := repo.ListOriginBranches(repoPath)
 	if err != nil {
 		return "", "", err
 	}
-	resolution, err := branch.Resolve(opts.From, branches)
+
+	remoteRefs := make([]string, 0, len(originBranches))
+	for _, name := range originBranches {
+		remoteRefs = append(remoteRefs, "origin/"+name)
+	}
+	resolution, err := branch.Resolve(opts.From, repo.Branches{Remote: remoteRefs})
 	if err != nil {
 		return "", "", err
 	}
 
 	ref = "origin/" + resolution.Target
-	if !contains(branches.Remote, ref) {
-		return "", "", fmt.Errorf("release branch %s not found on origin", resolution.Target)
-	}
-
 	major, minor, ok := parseReleaseLine(resolution.Target)
 	if !ok {
 		return "", "", fmt.Errorf("cannot parse release line from branch %q", resolution.Target)
 	}
 
-	tags, err := repo.ListTags(repoPath)
+	tags, err := repo.ListOriginTags(repoPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -130,8 +149,11 @@ func resolveTag(repoPath string, opts TagOptions) (tagName string, ref string, e
 	}
 
 	tagName = formatBranch(opts.TagFormat, version)
+	if parsed, ok := semver.ParseTag(tagName); !ok || parsed != version {
+		return "", "", fmt.Errorf("tag format %q produced incompatible tag %q", opts.TagFormat, tagName)
+	}
 	if contains(tags, tagName) {
-		return "", "", fmt.Errorf("tag %s already exists", tagName)
+		return "", "", fmt.Errorf("tag %s already exists on origin", tagName)
 	}
 	return tagName, ref, nil
 }
