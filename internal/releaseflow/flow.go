@@ -88,8 +88,15 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 	if err := validateTarget(repoPath, to); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
-	if release.Source == "local" {
-		if _, err := runner.Run(repoPath, "git", "push", "-u", "origin", release.LocalBranch); err != nil {
+
+	// An explicit local-only source may be intentionally promoted. Publish it
+	// create-only so a branch created concurrently on origin is never advanced by
+	// accident. If origin already has the branch, that remote branch is the
+	// authoritative PR source and the local copy is not pushed.
+	if release.Source == "local" && release.RemoteRef == "" {
+		lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:", release.LocalBranch)
+		refspec := fmt.Sprintf("%s:refs/heads/%s", release.LocalBranch, release.LocalBranch)
+		if _, err := runner.Run(repoPath, "git", "push", "-u", lease, "origin", refspec); err != nil {
 			return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 		}
 	}
@@ -187,7 +194,22 @@ func ensureClean(repoPath string) error {
 	return nil
 }
 
+// resolveRelease keeps automatic release selectors authoritative to the live
+// origin state, including dry-run. Explicit branch names still support a
+// local-only branch so release-pr can intentionally publish it.
 func resolveRelease(repoPath, from string) (branch.Resolution, error) {
+	if from == "latest-release" || from == "previous-release" {
+		originBranches, err := repo.ListOriginBranches(repoPath)
+		if err != nil {
+			return branch.Resolution{}, err
+		}
+		remoteRefs := make([]string, 0, len(originBranches))
+		for _, name := range originBranches {
+			remoteRefs = append(remoteRefs, "origin/"+name)
+		}
+		return branch.Resolve(from, repo.Branches{Remote: remoteRefs})
+	}
+
 	branches, err := repo.ListBranches(repoPath)
 	if err != nil {
 		return branch.Resolution{}, err
@@ -195,12 +217,15 @@ func resolveRelease(repoPath, from string) (branch.Resolution, error) {
 	return branch.Resolve(from, branches)
 }
 
+// validateTarget checks the live origin state rather than potentially stale
+// remote-tracking refs, so dry-run and real PR operations agree on target
+// existence.
 func validateTarget(repoPath, to string) error {
-	branches, err := repo.ListBranches(repoPath)
+	branches, err := repo.ListOriginBranches(repoPath)
 	if err != nil {
 		return err
 	}
-	if contains(branches.Remote, "origin/"+to) {
+	if contains(branches, to) {
 		return nil
 	}
 	return fmt.Errorf("target branch %q not found on origin", to)
