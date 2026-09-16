@@ -69,18 +69,23 @@ func Plan(repoPath, target string) RepoPlan {
 		return RepoPlan{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
 
+	update := "pull --ff-only"
+	if resolution.RemoteRef != "" {
+		update = fmt.Sprintf("merge --ff-only %s", resolution.RemoteRef)
+	}
+
 	if resolution.Source == "local" {
 		return RepoPlan{
 			RepoPath: repoPath,
 			Action:   ActionReady,
-			Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, checkout %s, pull --ff-only", resolution.LocalBranch),
+			Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, checkout %s, %s", resolution.LocalBranch, update),
 		}
 	}
 
 	return RepoPlan{
 		RepoPath: repoPath,
 		Action:   ActionReady,
-		Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, create tracking branch %s from %s, pull --ff-only", resolution.LocalBranch, resolution.RemoteRef),
+		Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, create tracking branch %s from %s, %s", resolution.LocalBranch, resolution.RemoteRef, update),
 	}
 }
 
@@ -122,7 +127,13 @@ func Execute(repoPath, target string) RepoPlan {
 		}
 	}
 
-	if err := repo.GitRun(repoPath, "pull", "--ff-only"); err != nil {
+	if resolution.RemoteRef != "" {
+		if err := repo.GitRun(repoPath, "merge", "--ff-only", resolution.RemoteRef); err != nil {
+			return RepoPlan{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+		}
+	} else if err := repo.GitRun(repoPath, "pull", "--ff-only"); err != nil {
+		// Backward-compatible fallback for an explicit local-only branch. Automatic
+		// release selectors and normal origin-backed branches never use this path.
 		return RepoPlan{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
