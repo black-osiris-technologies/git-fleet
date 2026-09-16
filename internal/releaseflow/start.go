@@ -49,21 +49,26 @@ func (o StartOptions) withDefaults() StartOptions {
 	return o
 }
 
-// PlanStart reports what StartRelease would do using the repository's current
-// local state. It performs no fetch and mutates nothing, so a version derived
-// here can lag the remote until StartRelease refreshes tags.
+// PlanStart reports what StartRelease would do using origin as the source of
+// truth. It reads remote refs with ls-remote, so dry-run stays accurate without
+// fetching or mutating local tags, branches, or remote-tracking refs.
 func PlanStart(repoPath string, opts StartOptions) Result {
 	opts = opts.withDefaults()
+
+	branches, err := repo.ListOriginBranches(repoPath)
+	if err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
+	if !contains(branches, opts.BaseBranch) {
+		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("base branch origin/%s not found", opts.BaseBranch)}
+	}
 
 	branchName, basis, err := resolveTarget(repoPath, opts)
 	if err != nil {
 		return skipOrFail(repoPath, err)
 	}
-
-	if exists, err := branchExists(repoPath, branchName); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
-	} else if exists {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("%s already exists", branchName)}
+	if contains(branches, branchName) {
+		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("%s already exists on origin", branchName)}
 	}
 
 	return Result{
@@ -74,43 +79,43 @@ func PlanStart(repoPath string, opts StartOptions) Result {
 }
 
 // StartRelease creates the next release line for a single repository. It skips
-// dirty worktrees, refreshes tags and branches with a pruning fetch, resolves
-// the next version from the highest stable tag (or an explicit override), and is
-// idempotent: an existing target branch is reported as skipped, never recreated.
+// dirty worktrees, prunes stale remote-tracking refs and tags, resolves the next
+// version from tags currently present on origin, and creates the remote branch
+// directly from origin/<base>. A same-named local-only branch is deliberately
+// ignored and never deleted or pushed.
 func StartRelease(repoPath string, opts StartOptions, runner Runner) Result {
 	opts = opts.withDefaults()
 
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
-	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--tags"); err != nil {
+	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--prune-tags", "--tags"); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
-	baseRef := "origin/" + opts.BaseBranch
-	if exists, err := branchExists(repoPath, baseRef); err != nil {
+	branches, err := repo.ListOriginBranches(repoPath)
+	if err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
-	} else if !exists {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("base branch %s not found", baseRef)}
+	}
+	if !contains(branches, opts.BaseBranch) {
+		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("base branch origin/%s not found", opts.BaseBranch)}
 	}
 
 	branchName, _, err := resolveTarget(repoPath, opts)
 	if err != nil {
 		return skipOrFail(repoPath, err)
 	}
-
-	if exists, err := branchExists(repoPath, branchName); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
-	} else if exists {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("%s already exists", branchName)}
+	if contains(branches, branchName) {
+		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: fmt.Sprintf("%s already exists on origin", branchName)}
 	}
 
-	// Create the branch without checking it out so a fleet-wide run never leaves
-	// repositories parked on a freshly created release branch.
-	if _, err := runner.Run(repoPath, "git", "branch", branchName, baseRef); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
-	}
-	if _, err := runner.Run(repoPath, "git", "push", "-u", "origin", branchName); err != nil {
+	baseRef := "origin/" + opts.BaseBranch
+	refspec := fmt.Sprintf("%s:refs/heads/%s", baseRef, branchName)
+	// Empty expected value means the destination ref must not exist. This keeps
+	// the create race-safe: if another actor creates the release branch after our
+	// ls-remote check, the push is rejected instead of advancing that branch.
+	lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:", branchName)
+	if _, err := runner.Run(repoPath, "git", "push", lease, "origin", refspec); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
@@ -122,7 +127,7 @@ func StartRelease(repoPath string, opts StartOptions, runner Runner) Result {
 }
 
 // resolveTarget computes the release branch name and a human-readable basis for
-// how the version was chosen (an explicit override or the highest tag).
+// how the version was chosen (an explicit override or the highest origin tag).
 func resolveTarget(repoPath string, opts StartOptions) (branchName string, basis string, err error) {
 	version, basis, err := resolveVersion(repoPath, opts)
 	if err != nil {
@@ -140,7 +145,7 @@ func resolveVersion(repoPath string, opts StartOptions) (semver.Version, string,
 		return version, "explicit version " + version.String(), nil
 	}
 
-	tags, err := repo.ListTags(repoPath)
+	tags, err := repo.ListOriginTags(repoPath)
 	if err != nil {
 		return semver.Version{}, "", err
 	}
@@ -162,21 +167,6 @@ func formatBranch(format string, version semver.Version) string {
 		"{patch}", strconv.Itoa(version.Patch),
 	)
 	return replacer.Replace(format)
-}
-
-// branchExists reports whether a local branch or remote-tracking ref of the
-// given name is present. The name may be a bare branch ("release-2.4"), in
-// which case the matching remote ref "origin/release-2.4" also counts, or an
-// already-qualified remote ref ("origin/develop").
-func branchExists(repoPath, name string) (bool, error) {
-	branches, err := repo.ListBranches(repoPath)
-	if err != nil {
-		return false, err
-	}
-	if contains(branches.Local, name) || contains(branches.Remote, name) {
-		return true, nil
-	}
-	return contains(branches.Remote, "origin/"+name), nil
 }
 
 func skipOrFail(repoPath string, err error) Result {
