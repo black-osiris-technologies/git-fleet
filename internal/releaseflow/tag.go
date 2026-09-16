@@ -96,8 +96,10 @@ func PlanTag(repoPath string, opts TagOptions) Result {
 
 // CreateTag cuts the next patch tag on a repository's release line and pushes it.
 // It prunes stale local tags, derives the patch sequence from tags currently on
-// origin, and tags the fetched origin tip of the release branch. An explicitly
-// pinned version that already exists on origin is reported as skipped.
+// origin, and tags the fetched origin tip of the release branch. Publication is
+// create-only: a concurrent actor creating the same tag causes the push lease to
+// fail rather than replacing that tag. If publication fails, the local tag made
+// by this invocation is removed best-effort so a retry can refetch origin cleanly.
 func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 	opts = opts.withDefaults()
 	if err := validateTagFormat(opts.TagFormat); err != nil {
@@ -123,8 +125,19 @@ func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 	if _, err := runner.Run(repoPath, "git", "tag", "-a", tagName, "-m", message, ref); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
-	if _, err := runner.Run(repoPath, "git", "push", "origin", tagName); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+
+	lease := fmt.Sprintf("--force-with-lease=refs/tags/%s:", tagName)
+	refspec := fmt.Sprintf("refs/tags/%s:refs/tags/%s", tagName, tagName)
+	if _, err := runner.Run(repoPath, "git", "push", lease, "origin", refspec); err != nil {
+		cleanupMessage := ""
+		if _, cleanupErr := runner.Run(repoPath, "git", "tag", "-d", tagName); cleanupErr != nil {
+			cleanupMessage = "; local tag cleanup also failed: " + cleanupErr.Error()
+		}
+		return Result{
+			RepoPath: repoPath,
+			Action:   ActionFailed,
+			Message:  err.Error() + cleanupMessage,
+		}
 	}
 
 	return Result{
