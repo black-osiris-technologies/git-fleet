@@ -1,248 +1,592 @@
 # Git Fleet
 
-> Safe, repeatable Git operations across every repository in your workspace.
+> Safe, repeatable Git and GitFlow operations across every repository in your workspace.
 
 [![CI](https://github.com/black-osiris-technologies/git-fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/black-osiris-technologies/git-fleet/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/black-osiris-technologies/git-fleet)](https://github.com/black-osiris-technologies/git-fleet/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)](go.mod)
 
-Git Fleet scans a directory of local repositories, explains what it would change, and performs guarded sync or release operations only where it is safe to proceed. It is built for developers who maintain many projects and want one predictable command instead of repetitive shell loops.
+Git Fleet coordinates the same guarded operation across many local Git repositories. It discovers repositories below a root directory, reports what it can safely do, and then synchronizes branches or performs release operations without destructive resets or hidden history rewrites.
 
-## Why Git Fleet
+It is designed for teams that use a GitFlow-style model with permanent integration/production branches and versioned release branches, especially when dozens of repositories need to move together.
 
-- **Safety first:** dirty repositories are skipped and risky operations are explicit.
-- **Plan before execution:** use `--dry-run` to inspect every intended command.
-- **GitFlow aware:** resolve `develop`, `master`, `main`, or the latest release branch.
-- **Automation friendly:** `--json` output, `--jobs` parallelism, stable exit behavior, and focused commands for scripts and CI.
-- **Cross-platform:** a single Go binary with no runtime dependencies.
+## What Git Fleet provides
+
+- **Fleet-wide discovery and status** across a directory tree.
+- **Safe synchronization** with dirty-worktree protection and fast-forward-only pulls.
+- **Active release selection** with `latest-release` and `previous-release`, resolved independently per repository.
+- **Release branch creation** from an authoritative `origin` state.
+- **Optional release tagging** with stable SemVer patch sequences.
+- **GitHub pull-request promotion** into production and integration branches.
+- **GitFlow release finishing** through merge commits, never squash merges.
+- **Dry-run-first workflows** for every mutating command.
+- **Machine-readable JSON**, bounded parallelism, deterministic output ordering, and CI-friendly non-zero failure exits.
+- **Cross-platform distribution** as a single Go binary.
+
+## Requirements and assumptions
+
+### Required for all commands
+
+- `git` must be available on `PATH`.
+- Repositories must be normal Git working trees discoverable below `--root`.
+- The canonical remote is currently expected to be named **`origin`**.
+
+### Required for GitHub PR commands
+
+`release-pr`, `release-merge`, and `release-finish` call the GitHub CLI (`gh`). For those commands you also need:
+
+- `gh` installed and available on `PATH`;
+- an authenticated GitHub CLI session (`gh auth status`);
+- permission to create or merge pull requests in the target repositories;
+- branch protection/review requirements satisfied before a merge can complete.
+
+`scan`, `status`, `sync`, `release-start`, and `release-tag` do not require `gh`.
+
+### Release naming conventions
+
+Automatic release resolution intentionally supports a constrained convention so every command can understand branches and tags created by every other command.
+
+**Release branches** must use one of these families:
+
+```text
+release-2.4
+release-2.4.0
+release/2.4
+release/2.4.0
+```
+
+In other words: `release-` or `release/`, followed by at least `MAJOR.MINOR`, with optional additional numeric components.
+
+**Stable release tags** must be SemVer triples with an optional `v` prefix:
+
+```text
+v2.4.0
+2.4.0
+```
+
+Pre-release/build forms such as `v2.4.0-rc.1` or `v2.4.0+build.7` are not used when deriving the next release line or patch sequence.
+
+Custom `--branch-format` and `--tag-format` values are validated. Git Fleet refuses a format that would create names its later automatic commands could not resolve.
 
 ## Install
 
-Git Fleet ships as a single binary with no runtime dependencies. Only Git is
-required to *use* it; Go is only needed if you build from source.
+Git Fleet ships as a single binary. Go is only required when building from source.
 
-**Linux / macOS — install script**
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/black-osiris-technologies/git-fleet/master/scripts/install.sh | sh
 ```
 
-Installs to `/usr/local/bin` (falling back to `~/.local/bin`). Pin a version or
-change the directory with `GIT_FLEET_VERSION` and `GIT_FLEET_INSTALL_DIR`.
+The installer uses `/usr/local/bin` when writable and otherwise falls back to `~/.local/bin`.
 
-**Windows — install script (PowerShell)**
+Optional environment variables:
+
+```bash
+GIT_FLEET_VERSION=v0.3.1 GIT_FLEET_INSTALL_DIR="$HOME/.local/bin" sh install.sh
+```
+
+### Windows PowerShell
 
 ```powershell
 irm https://raw.githubusercontent.com/black-osiris-technologies/git-fleet/master/scripts/install.ps1 | iex
 ```
 
-Installs to `%LOCALAPPDATA%\git-fleet\bin` and adds it to your user `PATH`.
+The installer places the binary under `%LOCALAPPDATA%\git-fleet\bin` and adds that directory to the user `PATH`.
 
-**Download a binary manually**
+### Manual binary download
 
-Grab the archive for your OS/arch from the [latest release](https://github.com/black-osiris-technologies/git-fleet/releases/latest),
-extract it, and move `git-fleet` onto your `PATH`. Checksums are published as
-`checksums.txt`.
+Download the archive for your OS/architecture from the [latest GitHub release](https://github.com/black-osiris-technologies/git-fleet/releases/latest), extract it, and place `git-fleet` on your `PATH`.
 
-**Linux packages**
+Release assets also include `checksums.txt`.
 
-`.deb` and `.rpm` packages are attached to each release:
+### Linux packages
 
 ```bash
-sudo dpkg -i git-fleet_*_linux_amd64.deb   # Debian/Ubuntu
-sudo rpm -i  git-fleet_*_linux_amd64.rpm   # Fedora/RHEL
+sudo dpkg -i git-fleet_*_linux_amd64.deb   # Debian / Ubuntu
+sudo rpm -i git-fleet_*_linux_amd64.rpm    # Fedora / RHEL
 ```
 
-**From source (requires Go 1.22+)**
+### Build/install from source
+
+Requires Go 1.22+:
 
 ```bash
 go install github.com/black-osiris-technologies/git-fleet/cmd/git-fleet@latest
 ```
 
-Note that `go install` places the binary in `$(go env GOPATH)/bin`, which may
-not be on your `PATH`. The install scripts above avoid that.
+`go install` writes to `$(go env GOPATH)/bin`, which may need to be added to your `PATH`.
 
-## Quick Start
+## Five-minute quick start
+
+Assume all repositories live somewhere below `~/code`:
 
 ```bash
+# Confirm the installed binary.
 git-fleet version
+
+# See what Git Fleet discovers.
 git-fleet scan --root ~/code
+
+# Check current branch / worktree state.
 git-fleet status --root ~/code
+
+# Preview synchronization first.
 git-fleet sync --root ~/code --target develop --dry-run
-```
 
-Review the dry-run output before removing `--dry-run`:
-
-```bash
+# Apply it after reviewing the plan.
 git-fleet sync --root ~/code --target develop
 ```
 
-## Commands
+The default root is the current directory (`.`), so `--root` can be omitted when you run Git Fleet from the workspace root.
 
-| Command | Purpose |
-| --- | --- |
-| `scan` | Discover Git repositories below a root directory. |
-| `status` | Report branch and working-tree state for every repository. |
-| `sync` | Fetch, switch, and fast-forward clean repositories to a target branch. |
-| `release-start` | Cut the next release branch from `origin/develop`, deriving the version from the latest tag. |
-| `release-tag` | Cut and push the next patch tag on a release line (`v2.4.0`, `v2.4.1`, …). |
-| `release-pr` | Create release promotion pull requests using explicit source and target branches. |
-| `release-merge` | Merge a release pull request with a normal merge commit. |
-| `release-finish` | Merge a release into both `master` and `develop`, then optionally delete the branch. |
-| `version` | Print the installed version, commit, and build date. |
+## Repository discovery
 
-Examples:
+`scan` recursively finds standard Git working trees under `--root` and returns them in stable path order.
 
 ```bash
-git-fleet sync --root . --target develop --dry-run
-git-fleet release-start --root . --dry-run
-git-fleet release-pr --root . --from latest-release --to master --dry-run
-git-fleet release-merge --root . --from latest-release --to master --merge-method merge --dry-run
-git-fleet release-finish --root . --from latest-release --dry-run
+git-fleet scan --root ~/code
+git-fleet scan --root ~/code --json
 ```
 
-### Starting the next release line
+To avoid expensive or irrelevant traversal, Git Fleet skips common generated/tooling directories such as:
 
-`release-start` cuts a new release branch from `origin/develop` across the fleet.
-The version is derived per repository from its highest stable tag, so repositories
-at different versions each advance independently:
+```text
+node_modules  vendor  dist  build  target  .idea  .vscode  .tmp
+```
+
+## Status
 
 ```bash
-# Latest tag 2.3.5 -> creates release-2.4 (next minor, the default).
+git-fleet status --root ~/code
+git-fleet status --root ~/code --jobs 4
+git-fleet status --root ~/code --json
+```
+
+Text output reports the current branch and whether the working tree is `clean` or `dirty`.
+
+If one or more repositories cannot be inspected, their errors are still printed and the process exits non-zero. A dirty repository by itself is not an error; it is valid status information.
+
+## Synchronizing repositories
+
+`sync` fetches and updates each **clean** repository to the requested target. Dirty repositories are skipped rather than modified.
+
+### Explicit branch
+
+```bash
+git-fleet sync --root ~/code --target develop --dry-run
+git-fleet sync --root ~/code --target develop
+
+git-fleet sync --root ~/code --target master
+git-fleet sync --root ~/code --target main
+```
+
+Any explicit branch name can be supplied. If it exists locally, Git Fleet uses the local branch; otherwise it can create a tracking branch from `origin/<name>`.
+
+### Latest active release per repository
+
+```bash
+git-fleet sync --root ~/code --target latest-release --dry-run
+git-fleet sync --root ~/code --target latest-release
+```
+
+`latest-release` selects the numerically highest release branch visible on `origin` independently for every repository.
+
+Example:
+
+```text
+repo-a: origin/release-2.8, origin/release-2.9   -> release-2.9
+repo-b: origin/release-4.1                      -> release-4.1
+```
+
+A local-only release branch is never considered an active automatic release.
+
+### Previous active release per repository
+
+```bash
+git-fleet sync --root ~/code --target previous-release --dry-run
+git-fleet sync --root ~/code --target previous-release
+```
+
+`previous-release` selects the second-highest active release on `origin` for each repository. A repository with fewer than two active release branches is reported as `SKIPPED`.
+
+This is useful when two release trains are being maintained in parallel and you need to switch the fleet between the current and previous line without hard-coding repository-specific versions.
+
+### What a real sync does
+
+For a clean repository, execution refreshes refs with:
+
+```text
+git fetch --prune --prune-tags --tags
+```
+
+It then checks out or creates the target tracking branch and runs:
+
+```text
+git pull --ff-only
+```
+
+Important consequences:
+
+- deleted remote-tracking branches are pruned;
+- tags deleted from `origin` are pruned locally;
+- **local-only tags can therefore be deleted** by synchronization;
+- non-fast-forward pulls fail instead of creating an implicit merge;
+- dirty working trees are skipped before mutation.
+
+Treat `origin` as authoritative for the tag namespace when using fleet synchronization.
+
+## Release lifecycle
+
+A typical GitFlow release across a fleet looks like this:
+
+```bash
+# 1. Make sure integration branches are current.
+git-fleet sync --root ~/code --target develop --dry-run
+git-fleet sync --root ~/code --target develop
+
+# 2. Cut the next release line in each repository.
 git-fleet release-start --root ~/code --dry-run
 git-fleet release-start --root ~/code
 
-# Start the next major line instead: latest tag 2.3.5 -> release-3.0.
-git-fleet release-start --root ~/code --major
+# 3. Work/synchronize on the active release line as needed.
+git-fleet sync --root ~/code --target latest-release
 
-# Seed the first release for repositories that have no tags yet.
-git-fleet release-start --root ~/code --version 1.0
-
-# Use a three-part branch name (for example release/2.4.0).
-git-fleet release-start --root ~/code --branch-format 'release/{major}.{minor}.{patch}'
-```
-
-Behavior worth knowing:
-
-- **Minor by default.** The latest tag is bumped by minor (`2.3.5` -> `release-2.4`);
-  pass `--major` for the next major line (`release-3.0`). Patch releases belong on an
-  existing release branch, so `release-start` does not create them.
-- **Idempotent.** If the target branch already exists it is reported as skipped and
-  never recreated, so re-running a partially completed fleet operation is safe.
-- **Pre-release tags are ignored** when choosing the latest version, and repositories
-  with no eligible tag are skipped unless you pass `--version`.
-- **Branch name is configurable** with `--branch-format` using `{major}`, `{minor}`,
-  and `{patch}` (default `release-{major}.{minor}`).
-
-### Tagging a release line
-
-`release-tag` cuts the next patch tag on a release line and pushes it. Tags are
-the immutable artifacts promoted through environments, so each stabilization
-iteration cuts the next patch:
-
-```bash
-# On the release-2.4 line: v2.4.0 first, then v2.4.1, v2.4.2, ...
+# 4. Optional: cut immutable patch tags if Git Fleet owns tagging.
 git-fleet release-tag --root ~/code --dry-run
 git-fleet release-tag --root ~/code
 
-# Target a specific release line rather than the latest.
-git-fleet release-tag --root ~/code --from release-2.4
+# 5. Create promotion PRs into both permanent branches.
+git-fleet release-pr --root ~/code --from latest-release --to master --dry-run
+git-fleet release-pr --root ~/code --from latest-release --to master
 
-# Pin an exact version (must be on the resolved line).
-git-fleet release-tag --root ~/code --version 2.4.3
+git-fleet release-pr --root ~/code --from latest-release --to develop --dry-run
+git-fleet release-pr --root ~/code --from latest-release --to develop
+
+# 6. After reviews/checks allow it, merge both PRs with merge commits.
+git-fleet release-finish --root ~/code --from latest-release --dry-run
+git-fleet release-finish --root ~/code --from latest-release
 ```
 
-Behavior worth knowing:
+Use `--from previous-release` anywhere a release selector is accepted when the operation must target the previous active release train instead.
 
-- **Continuous patch sequence.** The highest existing patch on the `MAJOR.MINOR`
-  line is advanced by one (or `.0` when the line has no tags yet); tags on other
-  lines never affect the sequence.
-- **Tags the authoritative tip.** The tag is created on `origin/<release-branch>`
-  after a pruning fetch, so a stabilized commit is promoted, never a stale local one.
-- **Annotated tags** named `v{major}.{minor}.{patch}` by default (`--tag-format` to
-  change), with an optional `--message`. A repository without a release branch on
-  origin is skipped.
-- **`release-tag` advances by design** — re-running cuts the next patch. Use
-  `--dry-run` to confirm the target before pushing.
+### `release-start`
 
-> **Note.** In a CI-driven release flow where a pipeline (for example Jenkins)
-> owns tagging — building the production artifact, running tests and
-> integrations, and tagging the validated commit so a single immutable artifact
-> is promoted across environments — that pipeline stays canonical for tags.
-> `release-tag` is then optional: use it for repositories without such a
-> pipeline, or for ad-hoc tagging. `release-start`, `release-pr`, and
-> `release-finish` complement a Jenkins-style flow without touching tags.
-
-### Finishing a release
-
-`release-finish` completes a GitFlow release by merging the release branch into
-**both** the production and integration branches with merge commits, preserving
-release history on both lines:
+`release-start` creates the next release branch from `origin/develop` by default.
 
 ```bash
-# Merge the open release PRs into master and develop (never squash).
-git-fleet release-finish --root ~/code --dry-run
-git-fleet release-finish --root ~/code
+# Highest stable origin tag v2.3.5 -> release-2.4
+git-fleet release-start --root ~/code --dry-run
+git-fleet release-start --root ~/code
 
-# Also delete the release branch on origin once both merges land.
-git-fleet release-finish --root ~/code --delete-branch
+# Next major line: v2.3.5 -> release-3.0
+git-fleet release-start --root ~/code --major
+
+# Repository has no stable tags yet: seed the first release explicitly.
+git-fleet release-start --root ~/code --version 1.0
+
+# Cut from another integration branch.
+git-fleet release-start --root ~/code --base main
+
+# Supported alternate release naming family.
+git-fleet release-start --root ~/code --branch-format 'release/{major}.{minor}.{patch}'
+```
+
+Behavior:
+
+- the latest **stable tag on `origin`** determines the next release version;
+- default bump is minor; `--major` starts the next major line;
+- patch releases stay on an existing release branch rather than creating a new line;
+- dry-run reads branches/tags directly from `origin` using `git ls-remote`, so stale local refs cannot affect planning;
+- real execution uses `fetch --prune --prune-tags --tags` first;
+- a local-only branch with the same target name is preserved and ignored;
+- the new branch is created directly on `origin` from `origin/<base>` without changing the repository's current checkout;
+- creation uses a create-only force-with-lease so a concurrent actor cannot have its newly created release branch silently advanced;
+- an existing target branch on `origin` is `SKIPPED`, making retries safe.
+
+See [docs/release-start-remote-authority.md](docs/release-start-remote-authority.md) for the remote-authority rationale.
+
+### `release-tag`
+
+`release-tag` creates the next stable patch tag on a release line and pushes it to `origin`.
+
+```bash
+# release-2.4 with no 2.4 tags -> v2.4.0
+# next run -> v2.4.1, then v2.4.2, ...
+git-fleet release-tag --root ~/code --dry-run
+git-fleet release-tag --root ~/code
+
+# Explicit release line.
+git-fleet release-tag --root ~/code --from release-2.4
+
+# Previous active release line.
+git-fleet release-tag --root ~/code --from previous-release
+
+# Pin an exact patch on the selected MAJOR.MINOR line.
+git-fleet release-tag --root ~/code --from release-2.4 --version 2.4.3
+
+# Stable SemVer without the leading v.
+git-fleet release-tag --root ~/code --tag-format '{major}.{minor}.{patch}'
+```
+
+Behavior:
+
+- branch and tag discovery is authoritative to `origin`, including dry-run;
+- deleted/stale local tags do not advance the patch sequence;
+- real execution prunes remote-tracking refs and stale local tags before tagging;
+- tags from other MAJOR.MINOR lines do not affect the selected line;
+- the tag points at the fetched `origin/<release-branch>` tip, not an arbitrary local commit;
+- tags are annotated; `--message` overrides the default `Release <tag>` annotation;
+- allowed tag formats are `v{major}.{minor}.{patch}` and `{major}.{minor}.{patch}` so future release discovery stays compatible.
+
+If Jenkins, GitHub Actions, or another pipeline already owns tagging and artifact promotion, keep that pipeline authoritative and treat `release-tag` as optional.
+
+### `release-pr`
+
+`release-pr` creates a GitHub pull request from a release branch to a target branch.
+
+```bash
+git-fleet release-pr --root ~/code --from latest-release --to master --dry-run
+git-fleet release-pr --root ~/code --from latest-release --to master
+
+git-fleet release-pr --root ~/code --from latest-release --to develop
+
+git-fleet release-pr --root ~/code --from previous-release --to master
+
+git-fleet release-pr --root ~/code --from release-2.4 --to master
+```
+
+The command uses `gh pr create`. Existing PRs are reported as `SKIPPED` rather than duplicated.
+
+Release PR descriptions explicitly require merge commits rather than squash merges.
+
+### `release-merge`
+
+Use `release-merge` when you want to merge one existing release PR into one target branch.
+
+```bash
+git-fleet release-merge --root ~/code --from latest-release --to master --dry-run
+git-fleet release-merge --root ~/code --from latest-release --to master
+```
+
+Only the `merge` method is supported:
+
+```bash
+git-fleet release-merge --root ~/code --merge-method merge
+```
+
+Squash/rebase release promotion is deliberately rejected because the release history is expected to remain explicit.
+
+### `release-finish`
+
+`release-finish` completes the normal GitFlow promotion by merging the existing release PRs into **both** permanent branches.
+
+```bash
+git-fleet release-finish --root ~/code --from latest-release --dry-run
+git-fleet release-finish --root ~/code --from latest-release
+
+# Delete the remote release branch only after both merges succeed in this run.
+git-fleet release-finish --root ~/code --from latest-release --delete-branch
 
 # Non-default permanent branch names.
 git-fleet release-finish --root ~/code --master main --develop develop
 ```
 
-Behavior worth knowing:
+Behavior:
 
-- **Both permanent branches.** The release is merged into `master` and `develop`
-  (configurable with `--master`/`--develop`), so neither line misses the release.
-- **Through pull requests.** It merges the existing open release PRs (create them
-  with `release-pr --to master` and `release-pr --to develop`), so branch
-  protection and review are honored; it never merges locally.
-- **Safe to re-run.** A branch with no open PR into a target is reported as
-  skipped rather than failed, so a partially completed finish can be repeated.
-- **Deletion is guarded.** `--delete-branch` removes the release branch on origin
-  only after both merges succeed in the same run, so an unmerged branch is never
-  deleted.
+- merges happen through GitHub PRs, so repository protection/review rules remain in force;
+- merge commits are used for both targets;
+- a missing open PR is `SKIPPED`, which makes reruns safe after a partial completion;
+- `--delete-branch` deletes the release branch only when both target merges succeeded during that invocation;
+- a merge or `gh` failure is `FAILED` and produces a non-zero process exit.
 
-Run `git-fleet <command> --help` for command-specific options.
+## Dry-run behavior
 
-### Automation and scale
+Use `--dry-run` before any command that can mutate repositories or remotes:
 
-- **`--json`** switches any command to a structured JSON document (`{"results":[…],"summary":{…}}`,
-  or `{"repos":[…]}` for `scan`) instead of tab-separated text, so output can be parsed
-  reliably in CI:
+```bash
+git-fleet sync --root ~/code --target develop --dry-run
+git-fleet release-start --root ~/code --dry-run
+git-fleet release-tag --root ~/code --dry-run
+git-fleet release-pr --root ~/code --from latest-release --to master --dry-run
+git-fleet release-merge --root ~/code --from latest-release --to master --dry-run
+git-fleet release-finish --root ~/code --from latest-release --dry-run
+```
 
-  ```bash
-  git-fleet status --root ~/code --json
-  git-fleet release-start --root ~/code --dry-run --json
-  ```
+Dry-run never performs the final mutation. Commands may still read local Git state or query `origin`/GitHub to build an accurate plan.
 
-- **`--jobs N`** processes repositories in parallel (default 8) for `status`, `sync`, and
-  the `release-*` commands. Repositories are independent working trees, so their git
-  operations run concurrently; output stays in a stable, path-sorted order regardless of
-  completion order. Use `--jobs 1` to force sequential processing.
+## Result states and exit codes
 
-## Safety Model
+Fleet action commands emit one result per repository.
 
-Git Fleet intentionally favors a stopped operation over an ambiguous mutation.
+| State | Meaning | Process failure? |
+| --- | --- | --- |
+| `PLANNED` / `READY` | Dry-run operation is valid. | No |
+| `DONE` | Operation completed. | No |
+| `SKIPPED` | Repository was intentionally not changed (dirty tree, missing applicable release, already completed state, etc.). | No |
+| `FAILED` | Git/GitHub/configuration operation failed. | **Yes** |
 
-- Dirty repositories are skipped by default.
-- Sync uses `fetch --prune` and `pull --ff-only`.
-- `release-start` creates a branch without checking it out and skips any repository whose target branch already exists, so it never overwrites work or leaves repositories on a new branch.
-- `release-tag` tags the fetched `origin` tip of a release branch and refuses to recreate a tag that already exists, so tags stay immutable.
-- Destructive resets, bulk commits, bulk pushes, and automatic branch deletion are out of scope.
-- Release promotions preserve merge history; squash release merges are rejected.
-- `release-finish` merges through pull requests into both permanent branches and deletes a release branch only after both merges succeed, so it never bypasses review or removes unmerged work.
-- Dry-run output is available for operations that can change repository state.
+Git Fleet prints the complete fleet report even when some repositories fail. After the report is emitted, any `FAILED` repository causes a non-zero process exit.
 
-Always keep independent backups for important work. A coordination tool cannot replace repository access controls or a recovery plan.
+`status` follows the same CI principle: inspection errors are printed and cause a non-zero exit, while a successfully inspected dirty repository does not.
 
-## Project Status
+This makes shell/CI usage predictable:
 
-Git Fleet is under active development. The current release covers repository discovery, status reporting, guarded synchronization, release branch creation, release tagging, and GitFlow release pull requests including finishing a release into both permanent branches. Interfaces may evolve before v1.0.
+```bash
+if ! git-fleet sync --root ~/code --target develop --json > fleet-result.json; then
+  echo "At least one repository failed to synchronize"
+fi
+```
 
-See [CHANGELOG.md](CHANGELOG.md) for shipped changes and the [issue tracker](https://github.com/black-osiris-technologies/git-fleet/issues) for planned work.
+## JSON output
+
+Use `--json` for automation:
+
+```bash
+git-fleet scan --root ~/code --json
+git-fleet status --root ~/code --json
+git-fleet sync --root ~/code --target latest-release --dry-run --json
+git-fleet release-start --root ~/code --dry-run --json
+```
+
+Action commands emit a document shaped like:
+
+```json
+{
+  "results": [
+    {
+      "repo": "/workspace/service-a",
+      "action": "DONE",
+      "message": "synced develop"
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "done": 1,
+    "failed": 0,
+    "skipped": 0,
+    "ready": 0
+  }
+}
+```
+
+The exact summary keys follow the command (`ready` for sync dry-run, `planned` for release dry-runs, and so on).
+
+A failed fleet still prints valid JSON before returning a non-zero exit code, allowing CI to preserve the detailed result as an artifact.
+
+## Parallelism
+
+`status`, `sync`, and all `release-*` commands support `--jobs`.
+
+```bash
+git-fleet sync --root ~/code --target develop --jobs 1
+git-fleet sync --root ~/code --target develop --jobs 16
+```
+
+Default concurrency is `8` repositories.
+
+Repositories are independent working trees, so operations can run concurrently. Results are stored by discovery index and printed in deterministic path order rather than completion order.
+
+Use `--jobs 1` when debugging or when external infrastructure should be exercised sequentially.
+
+## Safety model
+
+Git Fleet favors a stopped/skipped operation over an ambiguous mutation.
+
+- Dirty repositories are skipped before mutating operations.
+- Synchronization uses `pull --ff-only`; it does not manufacture merge commits.
+- `sync`, `release-start`, and `release-tag` can prune local tags that no longer exist on `origin`; do not use local-only tags as durable unpublished state when running those commands.
+- Automatic `latest-release` / `previous-release` selection ignores local-only release branches.
+- `release-start` creates the remote branch from the authoritative origin base and does not check it out locally.
+- Incompatible branch/tag formats are rejected before they can break later automatic release resolution.
+- Release promotion uses GitHub pull requests and merge commits.
+- Squash/rebase release merges are rejected by `release-merge`.
+- `release-finish --delete-branch` deletes only after both promotion merges succeed in the same invocation.
+- Git Fleet does not perform destructive resets, bulk commits, or silent force updates of existing release branches.
+- Failed repository operations are visible in output and produce a non-zero process exit.
+
+Backups, repository permissions, protected branches, required reviews, and CI checks remain the responsibility of the repository owner.
+
+## Common troubleshooting
+
+### `dirty worktree on <branch>`
+
+The repository is intentionally skipped. Commit, stash, or discard the local changes yourself, then rerun Git Fleet.
+
+Git Fleet will not automatically stash or reset work.
+
+### `previous-release requires at least 2 active release branches on origin`
+
+That repository has only one (or zero) active release lines. Use `latest-release`, an explicit branch, or create/restore the required release line.
+
+### `no eligible release tag found; pass --version to seed the first release`
+
+The repository has no stable `X.Y.Z` / `vX.Y.Z` tag on `origin` from which `release-start` can derive the next line.
+
+Example:
+
+```bash
+git-fleet release-start --root ~/code --version 1.0
+```
+
+### Incompatible branch/tag format
+
+Use release branches in the `release-X.Y[...]` or `release/X.Y[...]` family and stable tags as `vX.Y.Z` or `X.Y.Z`.
+
+Formats that create names outside those conventions are rejected because `latest-release`, `previous-release`, `release-tag`, and later release operations must be able to resolve them consistently.
+
+### `gh` authentication or permission failures
+
+Check:
+
+```bash
+gh auth status
+```
+
+Then confirm the authenticated account has access to the repositories and satisfies any protected-branch/review requirements.
+
+### A tag disappeared locally after sync/release operations
+
+`sync`, `release-start`, and `release-tag` intentionally use tag pruning. If a tag does not exist on `origin`, it can be removed locally.
+
+Push important tags before running those commands, or do not use local-only tags as unpublished work markers.
+
+## Command summary
+
+| Command | Purpose | Mutates state without `--dry-run`? | Needs `gh`? |
+| --- | --- | ---: | ---: |
+| `scan` | Discover repositories below a root. | No | No |
+| `status` | Report branch and worktree state. | No | No |
+| `sync` | Fetch, checkout/create target branches, fast-forward pull. | Yes | No |
+| `release-start` | Create the next release line from an origin base branch. | Yes | No |
+| `release-tag` | Create/push the next patch tag on a release line. | Yes | No |
+| `release-pr` | Create release promotion pull requests. | Yes | Yes |
+| `release-merge` | Merge one open release PR with a merge commit. | Yes | Yes |
+| `release-finish` | Merge release PRs into production + integration branches and optionally delete the release branch. | Yes | Yes |
+| `version` | Print version/build metadata. | No | No |
+
+Run command-specific help at any time:
+
+```bash
+git-fleet sync --help
+git-fleet release-start --help
+git-fleet release-tag --help
+git-fleet release-pr --help
+git-fleet release-merge --help
+git-fleet release-finish --help
+```
+
+## Project status
+
+Git Fleet is under active development and has not reached v1.0. Interfaces may still evolve, but safety and explicit behavior are treated as compatibility requirements.
+
+See:
+
+- [CHANGELOG.md](CHANGELOG.md) for shipped and unreleased changes;
+- [GitHub Issues](https://github.com/black-osiris-technologies/git-fleet/issues) for bugs and planned work;
+- [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance;
+- [SECURITY.md](SECURITY.md) for security reporting.
 
 ## Development
 
@@ -252,7 +596,7 @@ go vet ./...
 go build ./cmd/git-fleet
 ```
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md) before opening a pull request.
+The CI workflow runs the same checks for feature/defect branches and pull requests.
 
 ## License
 
