@@ -2,6 +2,7 @@ package releaseflow
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -33,6 +34,25 @@ type Summary struct {
 	Failed  int
 }
 
+type releaseSkipError struct {
+	err error
+}
+
+func (e releaseSkipError) Error() string { return e.err.Error() }
+func (e releaseSkipError) Unwrap() error { return e.err }
+
+func releaseSkip(err error) error {
+	return releaseSkipError{err: err}
+}
+
+func releaseErrorAction(err error) Action {
+	var skip releaseSkipError
+	if errors.As(err, &skip) {
+		return ActionSkipped
+	}
+	return ActionFailed
+}
+
 type Runner interface {
 	Run(dir string, command string, args ...string) (string, error)
 }
@@ -61,10 +81,10 @@ func (RealRunner) Run(dir string, command string, args ...string) (string, error
 func PlanPR(repoPath, from, to string) Result {
 	release, err := resolveRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	return Result{
 		RepoPath: repoPath,
@@ -83,10 +103,10 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 
 	release, err := resolveRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	// An explicit local-only source may be intentionally promoted. Publish it
@@ -114,12 +134,12 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 }
 
 func PlanMerge(repoPath, from, to string) Result {
-	release, err := resolveRelease(repoPath, from)
+	release, err := resolveRemoteRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	return Result{
 		RepoPath: repoPath,
@@ -136,9 +156,9 @@ func MergePR(repoPath, from, to string, runner Runner) Result {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
-	release, err := resolveRelease(repoPath, from)
+	release, err := resolveRemoteRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	action, message := mergeReleaseInto(repoPath, release.LocalBranch, to, runner)
@@ -151,7 +171,7 @@ func MergePR(repoPath, from, to string, runner Runner) Result {
 // git or gh failure yields a failed action.
 func mergeReleaseInto(repoPath, releaseBranch, to string, runner Runner) (Action, string) {
 	if err := validateTarget(repoPath, to); err != nil {
-		return ActionSkipped, err.Error()
+		return releaseErrorAction(err), err.Error()
 	}
 
 	number, err := runner.Run(repoPath, "gh", "pr", "list", "--base", to, "--head", releaseBranch, "--state", "open", "--json", "number", "--jq", ".[0].number")
@@ -194,27 +214,42 @@ func ensureClean(repoPath string) error {
 	return nil
 }
 
-// resolveRelease keeps automatic release selectors authoritative to the live
-// origin state, including dry-run. Explicit branch names still support a
-// local-only branch so release-pr can intentionally publish it.
+// resolveRelease is used by release-pr. Automatic release selectors are always
+// authoritative to origin. Explicit branch names may be local-only because
+// release-pr can intentionally publish such a branch create-only.
 func resolveRelease(repoPath, from string) (branch.Resolution, error) {
 	if from == "latest-release" || from == "previous-release" {
-		originBranches, err := repo.ListOriginBranches(repoPath)
-		if err != nil {
-			return branch.Resolution{}, err
-		}
-		remoteRefs := make([]string, 0, len(originBranches))
-		for _, name := range originBranches {
-			remoteRefs = append(remoteRefs, "origin/"+name)
-		}
-		return branch.Resolve(from, repo.Branches{Remote: remoteRefs})
+		return resolveRemoteRelease(repoPath, from)
 	}
 
 	branches, err := repo.ListBranches(repoPath)
 	if err != nil {
 		return branch.Resolution{}, err
 	}
-	return branch.Resolve(from, branches)
+	resolution, err := branch.Resolve(from, branches)
+	if err != nil {
+		return branch.Resolution{}, releaseSkip(err)
+	}
+	return resolution, nil
+}
+
+// resolveRemoteRelease requires the selected release branch to exist on origin.
+// It is used by merge/finish operations, where a local-only branch cannot have a
+// GitHub PR and must never be mistaken for an active remote release.
+func resolveRemoteRelease(repoPath, from string) (branch.Resolution, error) {
+	originBranches, err := repo.ListOriginBranches(repoPath)
+	if err != nil {
+		return branch.Resolution{}, err
+	}
+	remoteRefs := make([]string, 0, len(originBranches))
+	for _, name := range originBranches {
+		remoteRefs = append(remoteRefs, "origin/"+name)
+	}
+	resolution, err := branch.Resolve(from, repo.Branches{Remote: remoteRefs})
+	if err != nil {
+		return branch.Resolution{}, releaseSkip(err)
+	}
+	return resolution, nil
 }
 
 // validateTarget checks the live origin state rather than potentially stale
@@ -228,7 +263,7 @@ func validateTarget(repoPath, to string) error {
 	if contains(branches, to) {
 		return nil
 	}
-	return fmt.Errorf("target branch %q not found on origin", to)
+	return releaseSkip(fmt.Errorf("target branch %q not found on origin", to))
 }
 
 func contains(values []string, target string) bool {
