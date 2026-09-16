@@ -10,14 +10,33 @@ All notable changes are documented in this file. The project follows [Semantic V
   conventions, `latest-release` and `previous-release`, the end-to-end GitFlow
   lifecycle, JSON/parallel operation, exit codes, safety behavior, and common
   troubleshooting.
-- Regression coverage for remote-authoritative `release-tag` planning/execution,
+- Regression coverage for remote-authoritative release selection, stale/deleted
+  refs, tag pruning, create-only ref publication, guarded branch deletion,
   compatible release naming formats, and non-zero fleet failure reporting.
 
 ### Changed
 
+- `sync` dry-run now reads live branch names from `origin`, and origin-backed
+  synchronization fast-forwards explicitly from `origin/<branch>` rather than
+  relying on arbitrary local upstream configuration.
 - `release-tag` now treats `origin` as authoritative for both release-branch
   selection and patch-tag sequencing. Dry-run queries remote refs directly and
   real execution prunes stale local tags before resolving the next patch.
+- Tag publication is create-only with a ref lease. A failed tag push removes the
+  local tag created by that invocation best-effort so a retry can refetch remote
+  state cleanly.
+- Automatic `release-pr`, `release-merge`, and `release-finish` release selection
+  now reads live `origin` state. Target-branch checks also use live remote state,
+  avoiding stale remote-tracking refs during dry-run.
+- `release-pr` no longer pushes a same-named local branch when the source already
+  exists on `origin`. Explicit local-only sources are published create-only with
+  a lease.
+- `release-merge` and `release-finish` require their release source to exist on
+  `origin`; a local-only branch cannot be mistaken for a GitHub PR source.
+- `release-finish --delete-branch` now compares the live remote release SHA with
+  the fetched SHA and deletes with a lease. A concurrently advanced branch is
+  retained and reported as failed, while a branch already auto-deleted by GitHub
+  is accepted as the desired final state.
 - `--branch-format` and `--tag-format` are validated so Git Fleet cannot create
   release names that later automatic commands cannot resolve. Release branches
   must stay in the `release-X.Y[...]` / `release/X.Y[...]` families and release
@@ -26,6 +45,9 @@ All notable changes are documented in this file. The project follows [Semantic V
   complete report when any repository is `FAILED`. `status` follows the same
   rule for per-repository inspection errors; `SKIPPED` remains a successful
   process outcome.
+- Operational failures while querying `origin` are reported as `FAILED`, while
+  expected no-op conditions such as a missing applicable release remain
+  `SKIPPED`.
 - CLI help now documents `previous-release` anywhere a release selector is
   accepted and describes the supported release branch/tag format constraints.
 
