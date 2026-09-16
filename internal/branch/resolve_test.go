@@ -16,6 +16,25 @@ func TestResolveExplicitLocalBranch(t *testing.T) {
 	if resolution.Source != "local" || resolution.LocalBranch != "develop" {
 		t.Fatalf("Resolve() = %#v, want local develop", resolution)
 	}
+	if resolution.RemoteRef != "" {
+		t.Fatalf("Resolve() RemoteRef = %q, want empty for local-only branch", resolution.RemoteRef)
+	}
+}
+
+func TestResolveExplicitLocalBranchAlsoRecordsOriginRef(t *testing.T) {
+	resolution, err := Resolve("develop", repo.Branches{
+		Local:  []string{"develop"},
+		Remote: []string{"origin/develop"},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolution.Source != "local" || resolution.LocalBranch != "develop" {
+		t.Fatalf("Resolve() = %#v, want local develop", resolution)
+	}
+	if resolution.RemoteRef != "origin/develop" {
+		t.Fatalf("Resolve() RemoteRef = %q, want origin/develop", resolution.RemoteRef)
+	}
 }
 
 func TestResolveExplicitRemoteBranch(t *testing.T) {
