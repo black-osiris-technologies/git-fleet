@@ -49,6 +49,21 @@ func Plan(repoPath, target string) RepoPlan {
 		return RepoPlan{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
+	// Automatic release selectors must reflect the live remote even in dry-run.
+	// Keep local branch names so the plan can describe checkout vs tracking-branch
+	// creation, but replace potentially stale remote-tracking refs with ls-remote
+	// results from origin.
+	if target == "latest-release" || target == "previous-release" {
+		originBranches, err := repo.ListOriginBranches(repoPath)
+		if err != nil {
+			return RepoPlan{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+		}
+		branches.Remote = make([]string, 0, len(originBranches))
+		for _, name := range originBranches {
+			branches.Remote = append(branches.Remote, "origin/"+name)
+		}
+	}
+
 	resolution, err := branch.Resolve(target, branches)
 	if err != nil {
 		return RepoPlan{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
