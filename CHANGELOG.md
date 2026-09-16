@@ -4,6 +4,31 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Complete README usage guide covering requirements, `origin`/release naming
+  conventions, `latest-release` and `previous-release`, the end-to-end GitFlow
+  lifecycle, JSON/parallel operation, exit codes, safety behavior, and common
+  troubleshooting.
+- Regression coverage for remote-authoritative `release-tag` planning/execution,
+  compatible release naming formats, and non-zero fleet failure reporting.
+
+### Changed
+
+- `release-tag` now treats `origin` as authoritative for both release-branch
+  selection and patch-tag sequencing. Dry-run queries remote refs directly and
+  real execution prunes stale local tags before resolving the next patch.
+- `--branch-format` and `--tag-format` are validated so Git Fleet cannot create
+  release names that later automatic commands cannot resolve. Release branches
+  must stay in the `release-X.Y[...]` / `release/X.Y[...]` families and release
+  tags must remain stable SemVer triples with an optional `v` prefix.
+- Fleet action commands now return a non-zero process exit after printing the
+  complete report when any repository is `FAILED`. `status` follows the same
+  rule for per-repository inspection errors; `SKIPPED` remains a successful
+  process outcome.
+- CLI help now documents `previous-release` anywhere a release selector is
+  accepted and describes the supported release branch/tag format constraints.
+
 ## [0.3.1] - 2026-07-28
 
 ### Fixed
