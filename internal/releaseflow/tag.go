@@ -1,6 +1,7 @@
 package releaseflow
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -17,6 +18,25 @@ const DefaultTagFormat = "v{major}.{minor}.{patch}"
 // releaseLinePattern extracts the MAJOR.MINOR line from a release branch name,
 // accepting both "release-2.4" and "release/2.4.0" style names.
 var releaseLinePattern = regexp.MustCompile(`^release[-/](\d+)\.(\d+)`)
+
+type tagSkipError struct {
+	err error
+}
+
+func (e tagSkipError) Error() string { return e.err.Error() }
+func (e tagSkipError) Unwrap() error { return e.err }
+
+func tagSkip(err error) error {
+	return tagSkipError{err: err}
+}
+
+func tagErrorAction(err error) Action {
+	var skip tagSkipError
+	if errors.As(err, &skip) {
+		return ActionSkipped
+	}
+	return ActionFailed
+}
 
 // TagOptions configures a single-repository release-tag computation.
 type TagOptions struct {
@@ -65,7 +85,7 @@ func PlanTag(repoPath string, opts TagOptions) Result {
 
 	tagName, ref, err := resolveTag(repoPath, opts)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: tagErrorAction(err), Message: err.Error()}
 	}
 	return Result{
 		RepoPath: repoPath,
@@ -93,7 +113,7 @@ func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 
 	tagName, ref, err := resolveTag(repoPath, opts)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: tagErrorAction(err), Message: err.Error()}
 	}
 
 	message := opts.Message
@@ -116,7 +136,9 @@ func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 
 // resolveTag determines the tag name to create and the fetched origin ref to tag.
 // Branch and tag discovery is performed directly against origin so stale local
-// state cannot affect release selection or patch sequencing.
+// state cannot affect release selection or patch sequencing. Expected no-op
+// conditions are wrapped as tagSkipError; operational/configuration errors are
+// returned normally and therefore surface as FAILED.
 func resolveTag(repoPath string, opts TagOptions) (tagName string, ref string, err error) {
 	originBranches, err := repo.ListOriginBranches(repoPath)
 	if err != nil {
@@ -129,7 +151,7 @@ func resolveTag(repoPath string, opts TagOptions) (tagName string, ref string, e
 	}
 	resolution, err := branch.Resolve(opts.From, repo.Branches{Remote: remoteRefs})
 	if err != nil {
-		return "", "", err
+		return "", "", tagSkip(err)
 	}
 
 	ref = "origin/" + resolution.Target
@@ -153,7 +175,7 @@ func resolveTag(repoPath string, opts TagOptions) (tagName string, ref string, e
 		return "", "", fmt.Errorf("tag format %q produced incompatible tag %q", opts.TagFormat, tagName)
 	}
 	if contains(tags, tagName) {
-		return "", "", fmt.Errorf("tag %s already exists on origin", tagName)
+		return "", "", tagSkip(fmt.Errorf("tag %s already exists on origin", tagName))
 	}
 	return tagName, ref, nil
 }
