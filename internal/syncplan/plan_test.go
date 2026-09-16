@@ -35,6 +35,28 @@ func TestExecuteSyncsCleanRepository(t *testing.T) {
 	}
 }
 
+func TestExecuteSyncsLocalBranchWithoutUpstreamFromOrigin(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	clone := filepath.Join(root, "clone")
+
+	initRemoteAndSeed(t, root, remote, seed)
+	runGit(t, seed, "branch", "release-2.4", "develop")
+	runGit(t, seed, "push", "origin", "release-2.4")
+	runGit(t, root, "clone", remote, clone)
+	// Create the local branch deliberately without tracking configuration.
+	runGit(t, clone, "branch", "--no-track", "release-2.4", "origin/release-2.4")
+
+	plan := Execute(clone, "latest-release")
+	if plan.Action != ActionDone {
+		t.Fatalf("Execute() = %#v, want DONE without relying on local upstream config", plan)
+	}
+	if got := runGitOutput(t, clone, "rev-parse", "HEAD"); got != runGitOutput(t, clone, "rev-parse", "origin/release-2.4") {
+		t.Fatalf("HEAD = %s, want origin/release-2.4", got)
+	}
+}
+
 func TestPlanLatestReleaseReadsLiveOrigin(t *testing.T) {
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
