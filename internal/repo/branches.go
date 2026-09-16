@@ -24,6 +24,17 @@ func ListBranches(path string) (Branches, error) {
 	}, nil
 }
 
+// ListOriginBranches reads branch names directly from origin without updating
+// local refs. This is used by dry-run planning when origin must be authoritative
+// even if local remote-tracking refs are stale.
+func ListOriginBranches(path string) ([]string, error) {
+	output, err := gitOutput(path, "ls-remote", "--heads", "origin")
+	if err != nil {
+		return nil, err
+	}
+	return parseRemoteRefs(output, "refs/heads/"), nil
+}
+
 func splitLines(value string) []string {
 	if value == "" {
 		return nil
@@ -47,6 +58,19 @@ func filterRemoteBranches(branches []string) []string {
 			continue
 		}
 		result = append(result, branch)
+	}
+	return result
+}
+
+func parseRemoteRefs(output, prefix string) []string {
+	lines := splitLines(output)
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], prefix) {
+			continue
+		}
+		result = append(result, strings.TrimPrefix(fields[1], prefix))
 	}
 	return result
 }
