@@ -64,8 +64,8 @@ func TestCreateTagRejectsExplicitVersionOffLine(t *testing.T) {
 	clone, _ := createTagRepo(t, nil, []string{"release-2.4"})
 
 	result := CreateTag(clone, TagOptions{ExplicitVersion: "2.5.0"}, RealRunner{})
-	if result.Action != ActionSkipped {
-		t.Fatalf("CreateTag() = %#v, want SKIPPED for off-line version", result)
+	if result.Action != ActionFailed {
+		t.Fatalf("CreateTag() = %#v, want FAILED for off-line explicit version", result)
 	}
 	if !strings.Contains(result.Message, "release line") {
 		t.Fatalf("CreateTag() message = %q, want off-line explanation", result.Message)
