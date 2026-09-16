@@ -58,14 +58,14 @@ func Plan(repoPath, target string) RepoPlan {
 		return RepoPlan{
 			RepoPath: repoPath,
 			Action:   ActionReady,
-			Message:  fmt.Sprintf("would fetch --prune, checkout %s, pull --ff-only", resolution.LocalBranch),
+			Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, checkout %s, pull --ff-only", resolution.LocalBranch),
 		}
 	}
 
 	return RepoPlan{
 		RepoPath: repoPath,
 		Action:   ActionReady,
-		Message:  fmt.Sprintf("would fetch --prune, create tracking branch %s from %s, pull --ff-only", resolution.LocalBranch, resolution.RemoteRef),
+		Message:  fmt.Sprintf("would fetch --prune --prune-tags --tags, create tracking branch %s from %s, pull --ff-only", resolution.LocalBranch, resolution.RemoteRef),
 	}
 }
 
@@ -83,7 +83,7 @@ func Execute(repoPath, target string) RepoPlan {
 		}
 	}
 
-	if err := repo.GitRun(repoPath, "fetch", "--prune"); err != nil {
+	if err := repo.GitRun(repoPath, "fetch", "--prune", "--prune-tags", "--tags"); err != nil {
 		return RepoPlan{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
