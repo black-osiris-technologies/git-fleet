@@ -48,16 +48,17 @@ func TestFinishReleaseSkipsWhenNoOpenPRs(t *testing.T) {
 	}
 }
 
-func TestFinishReleaseDeletesBranchWhenRequested(t *testing.T) {
+func TestFinishReleaseDeletesBranchWhenRequestedWithLease(t *testing.T) {
 	repoPath := createFinishRepo(t)
 	runner := &fakeRunner{
 		outputs: map[string]string{
 			"git fetch --prune --tags": "",
 			"gh pr list --base master --head release-2.4 --state open --json number --jq .[0].number":  "10",
 			"gh pr list --base develop --head release-2.4 --state open --json number --jq .[0].number": "11",
-			"gh pr merge 10 --merge":               "Merged",
-			"gh pr merge 11 --merge":               "Merged",
-			"git push origin --delete release-2.4": "",
+			"gh pr merge 10 --merge": "Merged",
+			"gh pr merge 11 --merge": "Merged",
+			"git rev-parse origin/release-2.4": "abc123",
+			"git push --force-with-lease=refs/heads/release-2.4:abc123 origin :refs/heads/release-2.4": "",
 		},
 	}
 
@@ -67,6 +68,38 @@ func TestFinishReleaseDeletesBranchWhenRequested(t *testing.T) {
 	}
 	if !runner.sawDelete {
 		t.Fatal("FinishRelease(--delete-branch) did not delete the branch after both merges")
+	}
+	if !strings.Contains(runner.pushArgs, "--force-with-lease=refs/heads/release-2.4:abc123") {
+		t.Fatalf("delete push = %q, want lease tied to observed release SHA", runner.pushArgs)
+	}
+}
+
+func TestFinishReleaseRefusesDeleteWhenReleaseAdvanced(t *testing.T) {
+	repoPath := createFinishRepo(t)
+	deleteKey := "git push --force-with-lease=refs/heads/release-2.4:abc123 origin :refs/heads/release-2.4"
+	runner := &fakeRunner{
+		outputs: map[string]string{
+			"git fetch --prune --tags": "",
+			"gh pr list --base master --head release-2.4 --state open --json number --jq .[0].number":  "10",
+			"gh pr list --base develop --head release-2.4 --state open --json number --jq .[0].number": "11",
+			"gh pr merge 10 --merge": "Merged",
+			"gh pr merge 11 --merge": "Merged",
+			"git rev-parse origin/release-2.4": "abc123",
+		},
+		errors: map[string]error{
+			deleteKey: runnerError("stale info: release branch advanced"),
+		},
+	}
+
+	result := FinishRelease(repoPath, FinishOptions{DeleteBranch: true}, runner)
+	if result.Action != ActionFailed {
+		t.Fatalf("FinishRelease() = %#v, want FAILED when delete lease is rejected", result)
+	}
+	if !runner.sawDelete {
+		t.Fatal("FinishRelease() did not attempt the guarded delete")
+	}
+	if !strings.Contains(result.Message, "delete refused") {
+		t.Fatalf("FinishRelease() message = %q, want guarded-delete refusal", result.Message)
 	}
 }
 
@@ -100,8 +133,8 @@ func TestPlanFinishDoesNotMutate(t *testing.T) {
 	if !strings.Contains(result.Message, "master") || !strings.Contains(result.Message, "develop") {
 		t.Fatalf("PlanFinish() message = %q, want both targets mentioned", result.Message)
 	}
-	if !strings.Contains(result.Message, "delete") {
-		t.Fatalf("PlanFinish() message = %q, want delete noted", result.Message)
+	if !strings.Contains(result.Message, "delete") || !strings.Contains(result.Message, "has not advanced") {
+		t.Fatalf("PlanFinish() message = %q, want guarded delete noted", result.Message)
 	}
 }
 
