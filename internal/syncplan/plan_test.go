@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,43 @@ func TestExecuteSyncsCleanRepository(t *testing.T) {
 	seed := filepath.Join(root, "seed")
 	clone := filepath.Join(root, "clone")
 
+	initRemoteAndSeed(t, root, remote, seed)
+	runGit(t, root, "clone", remote, clone)
+
+	plan := Execute(clone, "develop")
+	if plan.Action != ActionDone {
+		t.Fatalf("Execute() = %#v, want DONE", plan)
+	}
+}
+
+func TestExecutePrunesLocalTagDeletedFromOrigin(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	clone := filepath.Join(root, "clone")
+
+	initRemoteAndSeed(t, root, remote, seed)
+	runGit(t, seed, "tag", "v1.0.0")
+	runGit(t, seed, "push", "origin", "v1.0.0")
+	runGit(t, root, "clone", remote, clone)
+
+	if got := runGitOutput(t, clone, "tag", "--list", "v1.0.0"); got != "v1.0.0" {
+		t.Fatalf("tag before remote deletion = %q, want v1.0.0", got)
+	}
+
+	runGit(t, seed, "push", "origin", ":refs/tags/v1.0.0")
+
+	plan := Execute(clone, "develop")
+	if plan.Action != ActionDone {
+		t.Fatalf("Execute() = %#v, want DONE", plan)
+	}
+	if got := runGitOutput(t, clone, "tag", "--list", "v1.0.0"); got != "" {
+		t.Fatalf("tag after sync = %q, want pruned", got)
+	}
+}
+
+func initRemoteAndSeed(t *testing.T, root, remote, seed string) {
+	t.Helper()
 	runGit(t, root, "init", "--bare", remote)
 	runGit(t, root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/develop")
 
@@ -39,13 +77,6 @@ func TestExecuteSyncsCleanRepository(t *testing.T) {
 	runGit(t, seed, "commit", "-m", "Initial commit")
 	runGit(t, seed, "remote", "add", "origin", remote)
 	runGit(t, seed, "push", "-u", "origin", "develop")
-
-	runGit(t, root, "clone", remote, clone)
-
-	plan := Execute(clone, "develop")
-	if plan.Action != ActionDone {
-		t.Fatalf("Execute() = %#v, want DONE", plan)
-	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
@@ -55,6 +86,17 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v in %q error = %v: %s", args, dir, err, string(output))
 	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %q error = %v: %s", args, dir, err, string(output))
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func mustMkdir(t *testing.T, path string) {
