@@ -30,15 +30,15 @@ func (o FinishOptions) withDefaults() FinishOptions {
 	return o
 }
 
-// PlanFinish reports what FinishRelease would do. Automatic release selectors
-// are resolved against live origin state through resolveRelease; planning does
-// not mutate refs or pull requests.
+// PlanFinish reports what FinishRelease would do. Release selection is resolved
+// against live origin state so a local-only or stale branch cannot be planned for
+// GitHub PR promotion. Planning does not mutate refs or pull requests.
 func PlanFinish(repoPath string, opts FinishOptions) Result {
 	opts = opts.withDefaults()
 
-	release, err := resolveRelease(repoPath, opts.From)
+	release, err := resolveRemoteRelease(repoPath, opts.From)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	message := fmt.Sprintf("would merge open PRs %s -> %s and %s -> %s with merge commits",
@@ -68,9 +68,9 @@ func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
-	release, err := resolveRelease(repoPath, opts.From)
+	release, err := resolveRemoteRelease(repoPath, opts.From)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	var parts []string
