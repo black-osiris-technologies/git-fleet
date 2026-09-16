@@ -30,8 +30,9 @@ func (o FinishOptions) withDefaults() FinishOptions {
 	return o
 }
 
-// PlanFinish reports what FinishRelease would do using the repository's current
-// local state. It performs no fetch and mutates nothing.
+// PlanFinish reports what FinishRelease would do. Automatic release selectors
+// are resolved against live origin state through resolveRelease; planning does
+// not mutate refs or pull requests.
 func PlanFinish(repoPath string, opts FinishOptions) Result {
 	opts = opts.withDefaults()
 
@@ -43,7 +44,7 @@ func PlanFinish(repoPath string, opts FinishOptions) Result {
 	message := fmt.Sprintf("would merge open PRs %s -> %s and %s -> %s with merge commits",
 		release.LocalBranch, opts.MasterBranch, release.LocalBranch, opts.DevelopBranch)
 	if opts.DeleteBranch {
-		message += fmt.Sprintf(", then delete %s", release.LocalBranch)
+		message += fmt.Sprintf(", then delete %s if origin has not advanced it", release.LocalBranch)
 	}
 	return Result{RepoPath: repoPath, Action: ActionPlanned, Message: message}
 }
@@ -55,7 +56,8 @@ func PlanFinish(repoPath string, opts FinishOptions) Result {
 // only a git or gh failure produces a failed action. An already-integrated line
 // (no open PR) is reported as skipped, making the operation safe to re-run. The
 // release branch is deleted only when --delete-branch is set and both merges
-// succeeded in this run, so an unmerged branch is never removed.
+// succeeded in this run. Deletion is protected by a force-with-lease tied to the
+// fetched release SHA, so a branch that advanced during the operation is kept.
 func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 	opts = opts.withDefaults()
 
@@ -86,11 +88,23 @@ func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 	}
 
 	if opts.DeleteBranch && !failed && merged == 2 {
-		if _, err := runner.Run(repoPath, "git", "push", "origin", "--delete", release.LocalBranch); err != nil {
-			parts = append(parts, "delete failed: "+err.Error())
+		releaseRef := "origin/" + release.LocalBranch
+		expectedSHA, err := runner.Run(repoPath, "git", "rev-parse", releaseRef)
+		if err != nil {
+			parts = append(parts, "delete precondition failed: "+err.Error())
+			failed = true
+		} else if strings.TrimSpace(expectedSHA) == "" {
+			parts = append(parts, "delete precondition failed: empty release SHA")
 			failed = true
 		} else {
-			parts = append(parts, "deleted "+release.LocalBranch)
+			lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", release.LocalBranch, strings.TrimSpace(expectedSHA))
+			deleteRefspec := fmt.Sprintf(":refs/heads/%s", release.LocalBranch)
+			if _, err := runner.Run(repoPath, "git", "push", lease, "origin", deleteRefspec); err != nil {
+				parts = append(parts, "delete refused: "+err.Error())
+				failed = true
+			} else {
+				parts = append(parts, "deleted "+release.LocalBranch)
+			}
 		}
 	}
 
