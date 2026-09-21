@@ -218,10 +218,13 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 		}
 		host = parsed.Hostname()
 		repoPath = strings.TrimPrefix(parsed.Path, "/")
-		if parsed.Scheme == "http" || parsed.Scheme == "https" {
-			// Preserve an explicit HTTPS/HTTP port for GitHub Enterprise API
-			// requests. SSH transport ports are not assumed to be API ports.
-			apiScheme = parsed.Scheme
+		if parsed.Scheme == "http" {
+			return "", "", "", "", fmt.Errorf("insecure HTTP origin %q is not supported for authenticated GitHub API operations", remote)
+		}
+		if parsed.Scheme == "https" {
+			// Preserve an explicit HTTPS port for GitHub Enterprise API requests.
+			// SSH transport ports are not assumed to be API ports.
+			apiScheme = "https"
 			apiAuthority = parsed.Host
 		}
 	} else if at := strings.LastIndex(remote, "@"); at >= 0 {
