@@ -16,7 +16,7 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ### Fixed
 
-- Targeted for v1.4.1: `release-pr`, `release-merge`, and `release-finish`
+- `release-pr`, `release-merge`, and `release-finish`
   no longer require the external GitHub CLI (`gh`). Git Fleet now performs PR
   discovery, creation, and merge operations through the GitHub REST API while
   preserving merge-commit-only release promotion.
@@ -24,6 +24,8 @@ All notable changes are documented in this file. The project follows [Semantic V
   changing repository state. Authentication is read from `GH_TOKEN` /
   `GITHUB_TOKEN` (or the GitHub Enterprise token variants) and is not persisted
   by Git Fleet.
+- GitHub.com tokens are never reused for non-`github.com` origins; GitHub Enterprise hosts require explicitly enterprise-scoped token variables, preventing credentials from being sent to arbitrary origin hosts.
+- GitHub Enterprise HTTP(S) origins with explicit ports now preserve that port when constructing REST API URLs.
 
 ### Changed
 
