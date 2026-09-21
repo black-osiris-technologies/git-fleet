@@ -85,7 +85,7 @@ func PlanStart(repoPath string, opts StartOptions) Result {
 }
 
 // StartRelease creates the next release line for a single repository. It skips
-// dirty worktrees, prunes stale remote-tracking refs and tags, resolves the next
+// dirty worktrees, prunes stale remote-tracking branches, resolves the next
 // version from tags currently present on origin, and creates the remote branch
 // directly from origin/<base>. A same-named local-only branch is deliberately
 // ignored and never deleted or pushed.
@@ -95,7 +95,7 @@ func StartRelease(repoPath string, opts StartOptions, runner Runner) Result {
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
-	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--prune-tags", "--tags"); err != nil {
+	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--tags"); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
