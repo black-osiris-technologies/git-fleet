@@ -22,7 +22,7 @@ func TestPlanTagIgnoresTagDeletedFromOriginButStillLocal(t *testing.T) {
 	}
 }
 
-func TestCreateTagPrunesTagsDeletedFromOrigin(t *testing.T) {
+func TestCreateTagPreservesUnrelatedLocalTagsDeletedFromOrigin(t *testing.T) {
 	clone, remote := createTagRepo(t, []string{"v2.4.0", "v9.9.9"}, []string{"release-2.4"})
 	runGit(t, clone, "push", "origin", ":refs/tags/v9.9.9")
 
@@ -37,8 +37,8 @@ func TestCreateTagPrunesTagsDeletedFromOrigin(t *testing.T) {
 	if !remoteHasTag(t, remote, "v2.4.1") {
 		t.Fatal("CreateTag() did not create v2.4.1 from origin tag state")
 	}
-	if localHasTag(t, clone, "v9.9.9") {
-		t.Fatal("CreateTag() left v9.9.9 locally after it was deleted from origin")
+	if !localHasTag(t, clone, "v9.9.9") {
+		t.Fatal("CreateTag() removed unrelated local tag v9.9.9")
 	}
 }
 
