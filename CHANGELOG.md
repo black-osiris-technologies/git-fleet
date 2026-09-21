@@ -25,7 +25,7 @@ All notable changes are documented in this file. The project follows [Semantic V
   `GITHUB_TOKEN` (or the GitHub Enterprise token variants) and is not persisted
   by Git Fleet.
 - GitHub.com tokens are never reused for non-`github.com` origins; GitHub Enterprise hosts require explicitly enterprise-scoped token variables, preventing credentials from being sent to arbitrary origin hosts.
-- GitHub Enterprise HTTP(S) origins with explicit ports now preserve that port when constructing REST API URLs.
+- GitHub Enterprise HTTPS origins with explicit ports now preserve that port when constructing REST API URLs; plaintext `http://` origins are rejected before authentication.
 
 ### Changed
 
