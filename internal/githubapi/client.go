@@ -36,12 +36,21 @@ func NewForRepo(repoPath string) (*Client, error) {
 		return nil, err
 	}
 
-	token := tokenFromEnv(host)
+	token := tokenFromEnv(host, apiBaseURL)
 	if token == "" {
 		if strings.EqualFold(host, "github.com") {
 			return nil, fmt.Errorf("GitHub API authentication required: set GH_TOKEN or GITHUB_TOKEN")
 		}
-		return nil, fmt.Errorf("GitHub API authentication required for %s: set GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN", host)
+		approved := strings.TrimSpace(os.Getenv("GIT_FLEET_GITHUB_HOST"))
+		if approved == "" {
+			return nil, fmt.Errorf("GitHub Enterprise host %s is not approved: set GIT_FLEET_GITHUB_HOST to the exact host[:port] before setting an enterprise token", apiAuthority(apiBaseURL))
+		}
+		return nil, fmt.Errorf("GitHub API authentication required for approved host %s: set GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN", apiAuthority(apiBaseURL))
+	}
+
+	httpClient, err := newHTTPClient(apiBaseURL)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Client{
@@ -49,7 +58,7 @@ func NewForRepo(repoPath string) (*Client, error) {
 		repo:       repository,
 		apiBaseURL: apiBaseURL,
 		token:      token,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpClient,
 	}, nil
 }
 
@@ -257,11 +266,14 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 	return host, owner, repository, apiBaseURL, nil
 }
 
-func tokenFromEnv(host string) string {
+func tokenFromEnv(host, apiBaseURL string) string {
 	names := []string{"GH_TOKEN", "GITHUB_TOKEN"}
 	if !strings.EqualFold(host, "github.com") {
-		// Never fall back to a GitHub.com token for an arbitrary origin host.
-		// Enterprise hosts require an explicitly enterprise-scoped credential.
+		// Enterprise credentials are only released when the API authority derived
+		// from origin exactly matches an operator-approved host[:port].
+		if !enterpriseHostApproved(apiBaseURL) {
+			return ""
+		}
 		names = []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
 	}
 	for _, name := range names {
@@ -270,6 +282,45 @@ func tokenFromEnv(host string) string {
 		}
 	}
 	return ""
+}
+
+func enterpriseHostApproved(apiBaseURL string) bool {
+	approved := strings.TrimSpace(os.Getenv("GIT_FLEET_GITHUB_HOST"))
+	if approved == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSuffix(approved, "/"), apiAuthority(apiBaseURL))
+}
+
+func apiAuthority(apiBaseURL string) string {
+	parsed, err := url.Parse(apiBaseURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
+}
+
+func newHTTPClient(apiBaseURL string) (*http.Client, error) {
+	base, err := url.Parse(apiBaseURL)
+	if err != nil || !strings.EqualFold(base.Scheme, "https") || base.Host == "" {
+		return nil, fmt.Errorf("invalid secure GitHub API base URL %q", apiBaseURL)
+	}
+	allowedAuthority := base.Host
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("GitHub API redirect limit exceeded")
+			}
+			if !strings.EqualFold(req.URL.Scheme, "https") {
+				return fmt.Errorf("refusing GitHub API redirect to non-HTTPS URL %q", req.URL.String())
+			}
+			if !strings.EqualFold(req.URL.Host, allowedAuthority) {
+				return fmt.Errorf("refusing GitHub API redirect from %s to unapproved host %s", allowedAuthority, req.URL.Host)
+			}
+			return nil
+		},
+	}, nil
 }
 
 func pullRequestAlreadyExists(body []byte) bool {
