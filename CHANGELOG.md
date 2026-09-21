@@ -14,6 +14,17 @@ All notable changes are documented in this file. The project follows [Semantic V
   refs, tag pruning, create-only ref publication, guarded branch deletion,
   compatible release naming formats, and non-zero fleet failure reporting.
 
+### Fixed
+
+- Targeted for v1.4.1: `release-pr`, `release-merge`, and `release-finish`
+  no longer require the external GitHub CLI (`gh`). Git Fleet now performs PR
+  discovery, creation, and merge operations through the GitHub REST API while
+  preserving merge-commit-only release promotion.
+- GitHub PR mutations now preflight the configured `origin` and API token before
+  changing repository state. Authentication is read from `GH_TOKEN` /
+  `GITHUB_TOKEN` (or the GitHub Enterprise token variants) and is not persisted
+  by Git Fleet.
+
 ### Changed
 
 - `sync` dry-run now reads live branch names from `origin`, and origin-backed

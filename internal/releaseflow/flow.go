@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/black-osiris-technologies/git-fleet/internal/branch"
+	"github.com/black-osiris-technologies/git-fleet/internal/githubapi"
 	"github.com/black-osiris-technologies/git-fleet/internal/repo"
 )
 
@@ -60,6 +62,14 @@ type Runner interface {
 type RealRunner struct{}
 
 func (RealRunner) Run(dir string, command string, args ...string) (string, error) {
+	// GitHub PR operations are handled by the native REST client. The "gh"
+	// command name is retained only as an internal compatibility dispatch so the
+	// release-flow code and its test runner do not need a broad patch-level
+	// rewrite. No external gh executable is launched.
+	if command == "gh" {
+		return runGitHubCommand(dir, args...)
+	}
+
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
 
@@ -78,6 +88,88 @@ func (RealRunner) Run(dir string, command string, args ...string) (string, error
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func runGitHubCommand(dir string, args ...string) (string, error) {
+	client, err := githubapi.NewForRepo(dir)
+	if err != nil {
+		return "", err
+	}
+
+	if len(args) == 2 && args[0] == "auth" && args[1] == "status" {
+		return "GitHub API token configured", nil
+	}
+	if len(args) < 2 || args[0] != "pr" {
+		return "", fmt.Errorf("unsupported internal GitHub operation: %s", strings.Join(args, " "))
+	}
+
+	switch args[1] {
+	case "create":
+		base, ok := commandArg(args[2:], "--base")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --base")
+		}
+		head, ok := commandArg(args[2:], "--head")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --head")
+		}
+		title, ok := commandArg(args[2:], "--title")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --title")
+		}
+		body, ok := commandArg(args[2:], "--body")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --body")
+		}
+		url, created, err := client.CreatePullRequest(base, head, title, body)
+		if err != nil {
+			return "", err
+		}
+		if !created {
+			return "", fmt.Errorf("pull request already exists")
+		}
+		return url, nil
+
+	case "list":
+		base, ok := commandArg(args[2:], "--base")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR list is missing --base")
+		}
+		head, ok := commandArg(args[2:], "--head")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR list is missing --head")
+		}
+		number, found, err := client.FindOpenPullRequest(base, head)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			return "", nil
+		}
+		return strconv.Itoa(number), nil
+
+	case "merge":
+		if len(args) < 4 || args[3] != "--merge" {
+			return "", fmt.Errorf("internal GitHub PR merge requires merge-commit mode")
+		}
+		number, err := strconv.Atoi(args[2])
+		if err != nil {
+			return "", fmt.Errorf("invalid pull request number %q", args[2])
+		}
+		return client.MergePullRequest(number)
+
+	default:
+		return "", fmt.Errorf("unsupported internal GitHub PR operation %q", args[1])
+	}
+}
+
+func commandArg(args []string, name string) (string, bool) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
 func PlanPR(repoPath, from, to string) Result {
 	release, err := resolveRelease(repoPath, from)
 	if err != nil {
@@ -94,6 +186,9 @@ func PlanPR(repoPath, from, to string) Result {
 }
 
 func CreatePR(repoPath, from, to string, runner Runner) Result {
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
@@ -149,6 +244,9 @@ func PlanMerge(repoPath, from, to string) Result {
 }
 
 func MergePR(repoPath, from, to string, runner Runner) Result {
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
