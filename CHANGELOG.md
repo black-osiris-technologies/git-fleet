@@ -4,6 +4,8 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-21
+
 ### Added
 
 - Complete README usage guide covering requirements, `origin`/release naming
@@ -63,6 +65,14 @@ All notable changes are documented in this file. The project follows [Semantic V
   `SKIPPED`.
 - CLI help now documents `previous-release` anywhere a release selector is
   accepted and describes the supported release branch/tag format constraints.
+
+## [0.4.0] - 2026-08-30
+
+### Note
+
+- The published `v0.4.0` tag points to the same source commit as the previous
+  production line, so it contains no additional source changes relative to
+  `v0.3.1`. The accumulated unreleased changes are published in `v0.4.1`.
 
 ## [0.3.1] - 2026-07-28
 
@@ -138,7 +148,9 @@ All notable changes are documented in this file. The project follows [Semantic V
 - Guarded synchronization with dry-run planning.
 - GitFlow release pull request and merge commands.
 
-[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.0...v0.2.1
