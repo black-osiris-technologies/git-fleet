@@ -13,7 +13,7 @@ All notable changes are documented in this file. The project follows [Semantic V
   lifecycle, JSON/parallel operation, exit codes, safety behavior, and common
   troubleshooting.
 - Regression coverage for remote-authoritative release selection, stale/deleted
-  refs, tag pruning, create-only ref publication, guarded branch deletion,
+  refs, local-tag preservation, create-only ref publication, guarded branch deletion,
   compatible release naming formats, and non-zero fleet failure reporting.
 
 ### Fixed
@@ -27,19 +27,19 @@ All notable changes are documented in this file. The project follows [Semantic V
   `GITHUB_TOKEN` (or the GitHub Enterprise token variants) and is not persisted
   by Git Fleet.
 - GitHub.com tokens are never reused for non-`github.com` origins; GitHub Enterprise hosts require explicitly enterprise-scoped token variables, preventing credentials from being sent to arbitrary origin hosts.
-- GitHub Enterprise HTTPS origins with explicit ports now preserve that port when constructing REST API URLs; plaintext `http://` origins are rejected before authentication.
+- GitHub Enterprise HTTPS origins with explicit ports preserve that port; enterprise tokens require an exact `GIT_FLEET_GITHUB_HOST` match, plaintext `http://` origins are rejected, and redirects may not downgrade TLS or change API authority.
 
 ### Changed
 
 - `sync` dry-run now reads live branch names from `origin`, and origin-backed
   synchronization fast-forwards explicitly from `origin/<branch>` rather than
   relying on arbitrary local upstream configuration.
-- `release-tag` now treats `origin` as authoritative for both release-branch
-  selection and patch-tag sequencing. Dry-run queries remote refs directly and
-  real execution prunes stale local tags before resolving the next patch.
-- Tag publication is create-only with a ref lease. A failed tag push removes the
-  local tag created by that invocation best-effort so a retry can refetch remote
-  state cleanly.
+- `release-tag` treats `origin` as authoritative for release-branch selection
+  and patch-tag sequencing while preserving local-only tags. A conflicting local
+  tag fails safely instead of being deleted automatically.
+- Tag publication is create-only with a ref lease. A failed tag push removes only
+  the local tag created by that invocation best-effort; pre-existing local tags
+  are never pruned by routine sync or release operations.
 - Automatic `release-pr`, `release-merge`, and `release-finish` release selection
   now reads live `origin` state. Target-branch checks also use live remote state,
   avoiding stale remote-tracking refs during dry-run.
