@@ -37,14 +37,22 @@ Git Fleet deliberately treats `origin` as authoritative for automatic release se
 
 ### Required for GitHub PR commands
 
-`release-pr`, `release-merge`, and `release-finish` use the GitHub CLI (`gh`). For those commands you also need:
+`release-pr`, `release-merge`, and `release-finish` call the GitHub REST API directly. The GitHub CLI (`gh`) is **not** required and does not need to be installed or present on `PATH`.
 
-- `gh` installed and available on `PATH`;
-- an authenticated session (`gh auth status`);
-- permission to create or merge pull requests in the target repositories;
-- repository review, status-check, and branch-protection requirements satisfied before merging.
+For GitHub.com, set one of these environment variables before running a mutating PR command:
 
-`scan`, `status`, `sync`, `release-start`, and `release-tag` do not require `gh`.
+- `GH_TOKEN` (preferred);
+- `GITHUB_TOKEN`.
+
+For GitHub Enterprise Server, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are also supported and take precedence over the generic token variables.
+
+The token must have access to the target repository and permission to create or merge pull requests. For a fine-grained personal access token, grant the repository **Pull requests: write** permission. Repository review, status-check, and branch-protection requirements still apply; Git Fleet does not bypass them.
+
+Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported.
+
+Real PR commands validate that a supported GitHub `origin` and a token are configured before performing Git mutations. `--dry-run` remains non-mutating and does not call the GitHub API, so it does not validate token correctness or repository API permissions.
+
+`scan`, `status`, `sync`, `release-start`, and `release-tag` do not require a GitHub API token.
 
 ### Release naming conventions
 
@@ -396,7 +404,7 @@ Behavior:
 - target existence is checked against live `origin`;
 - when the source already exists on `origin`, a same-named local branch is **not pushed**, preventing stale local state from changing the PR source;
 - an explicit local-only source can be published intentionally, but publication is create-only with a lease so a concurrently created remote branch is not advanced;
-- `gh pr create` is used for the pull request;
+- the GitHub REST API is used directly to detect/create the pull request; no `gh` executable is required;
 - an already-existing PR is `SKIPPED` rather than duplicated;
 - the generated PR text instructs maintainers to use merge commits rather than squash.
 
@@ -417,7 +425,7 @@ git-fleet release-merge --root ~/code --merge-method merge
 
 The source release branch must exist on `origin`; a local-only release branch is not considered mergeable through GitHub PRs.
 
-`release-merge` uses `gh pr list` to find the open PR and `gh pr merge --merge` to merge it. A missing open PR is `SKIPPED`.
+`release-merge` uses the GitHub REST API to find the open PR and merges it with GitHub's `merge` method. A missing open PR is `SKIPPED`.
 
 ## `release-finish`
 
@@ -463,7 +471,7 @@ Dry-run does not create branches/tags, change the checkout, push refs, create PR
 
 Where remote truth determines the operation, Git Fleet uses read-only `git ls-remote` queries so stale remote-tracking refs do not silently drive planning.
 
-For PR merge/finish commands, dry-run validates source/target ref selection but does not claim an open PR exists; actual open-PR discovery happens during execution through `gh`.
+For PR merge/finish commands, dry-run validates source/target ref selection but does not claim an open PR exists; actual open-PR discovery happens during execution through the GitHub REST API. Dry-run does not require or validate a GitHub API token.
 
 ## Result states and exit codes
 
@@ -487,7 +495,7 @@ Examples of `FAILED` conditions include:
 - inability to query/fetch/push `origin`;
 - invalid release/tag configuration;
 - non-fast-forward synchronization;
-- GitHub CLI failures;
+- GitHub API authentication, permission, or request failures;
 - a guarded branch deletion refused because the branch advanced.
 
 The complete fleet report is printed first. If any repository is `FAILED`, the command then returns a non-zero process exit. `SKIPPED` alone keeps exit code 0.
@@ -586,14 +594,21 @@ git ls-remote --heads origin 'refs/heads/release*'
 
 ### GitHub PR commands fail
 
-Check authentication and repository access:
+The PR commands do not use the GitHub CLI. Ensure a token is available to the Git Fleet process:
 
 ```bash
-gh auth status
-gh repo view
+# bash / zsh
+export GH_TOKEN="<token>"
 ```
 
-Also verify branch-protection and required-review/status-check rules.
+```powershell
+# PowerShell
+$env:GH_TOKEN = "<token>"
+```
+
+`GITHUB_TOKEN` is also accepted. On GitHub Enterprise Server, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are supported as well.
+
+For a fine-grained token, verify that the target repository is included and **Pull requests: write** is granted. API errors are reported by repository with the HTTP status and GitHub message. Also verify branch-protection and required-review/status-check rules.
 
 ### A release branch was not deleted after `release-finish --delete-branch`
 
