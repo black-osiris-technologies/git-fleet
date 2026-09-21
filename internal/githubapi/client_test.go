@@ -19,6 +19,7 @@ func TestParseRemote(t *testing.T) {
 		{"git@github.com:black-osiris-technologies/git-fleet.git", "github.com", "black-osiris-technologies", "git-fleet", "https://api.github.com"},
 		{"https://github.com/black-osiris-technologies/git-fleet.git", "github.com", "black-osiris-technologies", "git-fleet", "https://api.github.com"},
 		{"ssh://git@github.example.com/owner/repo.git", "github.example.com", "owner", "repo", "https://github.example.com/api/v3"},
+		{"https://github.example.com:8443/owner/repo.git", "github.example.com", "owner", "repo", "https://github.example.com:8443/api/v3"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.remote, func(t *testing.T) {
@@ -113,5 +114,43 @@ func TestMergePullRequestForcesMergeCommitMethod(t *testing.T) {
 	}
 	if message != "Pull Request successfully merged" {
 		t.Fatalf("MergePullRequest() = %q", message)
+	}
+}
+
+
+func TestEnterpriseHostDoesNotUseGenericGitHubToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "github-dot-com-token")
+	t.Setenv("GITHUB_TOKEN", "github-dot-com-token-2")
+	t.Setenv("GH_ENTERPRISE_TOKEN", "")
+	t.Setenv("GITHUB_ENTERPRISE_TOKEN", "")
+
+	if got := tokenFromEnv("ghe.example.com"); got != "" {
+		t.Fatalf("tokenFromEnv(enterprise) = %q, want no generic-token fallback", got)
+	}
+
+	t.Setenv("GH_ENTERPRISE_TOKEN", "enterprise-token")
+	if got := tokenFromEnv("ghe.example.com"); got != "enterprise-token" {
+		t.Fatalf("tokenFromEnv(enterprise) = %q, want enterprise token", got)
+	}
+}
+
+func TestGitHubDotComUsesGenericToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "github-dot-com-token")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_ENTERPRISE_TOKEN", "enterprise-token")
+
+	if got := tokenFromEnv("github.com"); got != "github-dot-com-token" {
+		t.Fatalf("tokenFromEnv(github.com) = %q, want GH_TOKEN", got)
+	}
+}
+
+
+func TestParseRemoteRejectsHTTPOrigin(t *testing.T) {
+	_, _, _, _, err := parseRemote("http://ghe.example.com:8080/owner/repo.git")
+	if err == nil {
+		t.Fatal("parseRemote(http) error = nil, want insecure-origin rejection")
+	}
+	if !strings.Contains(err.Error(), "insecure HTTP origin") {
+		t.Fatalf("parseRemote(http) error = %q, want insecure-origin explanation", err)
 	}
 }
