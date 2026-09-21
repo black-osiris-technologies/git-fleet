@@ -99,6 +99,80 @@ func TestPlanStartDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestPlanStartIgnoresTagDeletedFromOriginButStillLocal(t *testing.T) {
+	clone, _ := createStartRepo(t, []string{"v2.2.9", "v2.3.5"}, nil)
+	runGit(t, clone, "push", "origin", ":refs/tags/v2.3.5")
+
+	if !localHasTag(t, clone, "v2.3.5") {
+		t.Fatal("test setup lost stale local tag v2.3.5")
+	}
+
+	result := PlanStart(clone, StartOptions{})
+	if result.Action != ActionPlanned {
+		t.Fatalf("PlanStart() = %#v, want PLANNED", result)
+	}
+	if !strings.Contains(result.Message, "release-2.3") || strings.Contains(result.Message, "release-2.4") {
+		t.Fatalf("PlanStart() message = %q, want origin tag v2.2.9 to yield release-2.3", result.Message)
+	}
+}
+
+func TestStartReleasePreservesDeletedOriginTagButIgnoresIt(t *testing.T) {
+	clone, remote := createStartRepo(t, []string{"v2.2.9", "v2.3.5"}, nil)
+	runGit(t, clone, "push", "origin", ":refs/tags/v2.3.5")
+
+	result := StartRelease(clone, StartOptions{}, RealRunner{})
+	if result.Action != ActionDone {
+		t.Fatalf("StartRelease() = %#v, want DONE", result)
+	}
+	if !remoteHasBranch(t, remote, "release-2.3") {
+		t.Fatal("StartRelease() did not derive release-2.3 from tags still present on origin")
+	}
+	if !localHasTag(t, clone, "v2.3.5") {
+		t.Fatal("StartRelease() removed local tag v2.3.5 even though release selection is based on origin")
+	}
+}
+
+func TestPlanStartIgnoresLocalOnlyReleaseBranch(t *testing.T) {
+	clone, _ := createStartRepo(t, []string{"v2.3.5"}, []string{"release-2.4"})
+	runGit(t, clone, "branch", "release-2.4", "origin/release-2.4")
+	runGit(t, clone, "push", "origin", "--delete", "release-2.4")
+
+	result := PlanStart(clone, StartOptions{})
+	if result.Action != ActionPlanned {
+		t.Fatalf("PlanStart() = %#v, want PLANNED with only a stale local release branch", result)
+	}
+	if !strings.Contains(result.Message, "would create release-2.4") {
+		t.Fatalf("PlanStart() message = %q, want release-2.4 creation plan", result.Message)
+	}
+}
+
+func TestStartReleaseCreatesFromOriginDespiteStaleLocalBranch(t *testing.T) {
+	clone, remote := createStartRepo(t, []string{"v2.3.5"}, []string{"release-2.4"})
+	runGit(t, clone, "branch", "release-2.4", "origin/release-2.4")
+	runGit(t, clone, "push", "origin", "--delete", "release-2.4")
+	runGit(t, clone, "checkout", "release-2.4")
+	if err := os.WriteFile(filepath.Join(clone, "STALE.txt"), []byte("local-only release work\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	runGit(t, clone, "add", "STALE.txt")
+	runGit(t, clone, "commit", "-m", "local stale release commit")
+	staleSHA := testGitOutput(t, clone, "rev-parse", "release-2.4")
+	developSHA := testGitOutput(t, clone, "rev-parse", "origin/develop")
+
+	result := StartRelease(clone, StartOptions{}, RealRunner{})
+	if result.Action != ActionDone {
+		t.Fatalf("StartRelease() = %#v, want DONE", result)
+	}
+
+	remoteSHA := testGitOutput(t, clone, "--git-dir", remote, "rev-parse", "refs/heads/release-2.4")
+	if remoteSHA != developSHA {
+		t.Fatalf("remote release-2.4 = %s, want origin/develop %s", remoteSHA, developSHA)
+	}
+	if remoteSHA == staleSHA {
+		t.Fatalf("remote release-2.4 unexpectedly used stale local branch %s", staleSHA)
+	}
+}
+
 // createStartRepo builds a bare origin with a develop branch, applies the given
 // tags and extra branches, and returns a fresh clone plus the remote path.
 func createStartRepo(t *testing.T, tags, branches []string) (clone string, remote string) {
@@ -151,4 +225,20 @@ func remoteHasBranch(t *testing.T, remote, branch string) bool {
 		t.Fatalf("git branch --list in %q error = %v: %s", remote, err, string(output))
 	}
 	return strings.Contains(string(output), branch)
+}
+
+func localHasTag(t *testing.T, repoPath, tag string) bool {
+	t.Helper()
+	return strings.TrimSpace(testGitOutput(t, repoPath, "tag", "--list", tag)) == tag
+}
+
+func testGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %q error = %v: %s", args, dir, err, string(output))
+	}
+	return strings.TrimSpace(string(output))
 }

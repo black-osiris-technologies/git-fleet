@@ -2,11 +2,14 @@ package releaseflow
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/black-osiris-technologies/git-fleet/internal/branch"
+	"github.com/black-osiris-technologies/git-fleet/internal/githubapi"
 	"github.com/black-osiris-technologies/git-fleet/internal/repo"
 )
 
@@ -33,6 +36,25 @@ type Summary struct {
 	Failed  int
 }
 
+type releaseSkipError struct {
+	err error
+}
+
+func (e releaseSkipError) Error() string { return e.err.Error() }
+func (e releaseSkipError) Unwrap() error { return e.err }
+
+func releaseSkip(err error) error {
+	return releaseSkipError{err: err}
+}
+
+func releaseErrorAction(err error) Action {
+	var skip releaseSkipError
+	if errors.As(err, &skip) {
+		return ActionSkipped
+	}
+	return ActionFailed
+}
+
 type Runner interface {
 	Run(dir string, command string, args ...string) (string, error)
 }
@@ -40,6 +62,14 @@ type Runner interface {
 type RealRunner struct{}
 
 func (RealRunner) Run(dir string, command string, args ...string) (string, error) {
+	// GitHub PR operations are handled by the native REST client. The "gh"
+	// command name is retained only as an internal compatibility dispatch so the
+	// release-flow code and its test runner do not need a broad patch-level
+	// rewrite. No external gh executable is launched.
+	if command == "gh" {
+		return runGitHubCommand(dir, args...)
+	}
+
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
 
@@ -58,13 +88,95 @@ func (RealRunner) Run(dir string, command string, args ...string) (string, error
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func runGitHubCommand(dir string, args ...string) (string, error) {
+	client, err := githubapi.NewForRepo(dir)
+	if err != nil {
+		return "", err
+	}
+
+	if len(args) == 2 && args[0] == "auth" && args[1] == "status" {
+		return "GitHub API token configured", nil
+	}
+	if len(args) < 2 || args[0] != "pr" {
+		return "", fmt.Errorf("unsupported internal GitHub operation: %s", strings.Join(args, " "))
+	}
+
+	switch args[1] {
+	case "create":
+		base, ok := commandArg(args[2:], "--base")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --base")
+		}
+		head, ok := commandArg(args[2:], "--head")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --head")
+		}
+		title, ok := commandArg(args[2:], "--title")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --title")
+		}
+		body, ok := commandArg(args[2:], "--body")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR create is missing --body")
+		}
+		url, created, err := client.CreatePullRequest(base, head, title, body)
+		if err != nil {
+			return "", err
+		}
+		if !created {
+			return "", fmt.Errorf("pull request already exists")
+		}
+		return url, nil
+
+	case "list":
+		base, ok := commandArg(args[2:], "--base")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR list is missing --base")
+		}
+		head, ok := commandArg(args[2:], "--head")
+		if !ok {
+			return "", fmt.Errorf("internal GitHub PR list is missing --head")
+		}
+		number, found, err := client.FindOpenPullRequest(base, head)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			return "", nil
+		}
+		return strconv.Itoa(number), nil
+
+	case "merge":
+		if len(args) < 4 || args[3] != "--merge" {
+			return "", fmt.Errorf("internal GitHub PR merge requires merge-commit mode")
+		}
+		number, err := strconv.Atoi(args[2])
+		if err != nil {
+			return "", fmt.Errorf("invalid pull request number %q", args[2])
+		}
+		return client.MergePullRequest(number)
+
+	default:
+		return "", fmt.Errorf("unsupported internal GitHub PR operation %q", args[1])
+	}
+}
+
+func commandArg(args []string, name string) (string, bool) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
 func PlanPR(repoPath, from, to string) Result {
 	release, err := resolveRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	return Result{
 		RepoPath: repoPath,
@@ -74,6 +186,9 @@ func PlanPR(repoPath, from, to string) Result {
 }
 
 func CreatePR(repoPath, from, to string, runner Runner) Result {
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
@@ -83,13 +198,20 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 
 	release, err := resolveRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
-	if release.Source == "local" {
-		if _, err := runner.Run(repoPath, "git", "push", "-u", "origin", release.LocalBranch); err != nil {
+
+	// An explicit local-only source may be intentionally promoted. Publish it
+	// create-only so a branch created concurrently on origin is never advanced by
+	// accident. If origin already has the branch, that remote branch is the
+	// authoritative PR source and the local copy is not pushed.
+	if release.Source == "local" && release.RemoteRef == "" {
+		lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:", release.LocalBranch)
+		refspec := fmt.Sprintf("%s:refs/heads/%s", release.LocalBranch, release.LocalBranch)
+		if _, err := runner.Run(repoPath, "git", "push", "-u", lease, "origin", refspec); err != nil {
 			return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 		}
 	}
@@ -107,12 +229,12 @@ func CreatePR(repoPath, from, to string, runner Runner) Result {
 }
 
 func PlanMerge(repoPath, from, to string) Result {
-	release, err := resolveRelease(repoPath, from)
+	release, err := resolveRemoteRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	if err := validateTarget(repoPath, to); err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 	return Result{
 		RepoPath: repoPath,
@@ -122,6 +244,9 @@ func PlanMerge(repoPath, from, to string) Result {
 }
 
 func MergePR(repoPath, from, to string, runner Runner) Result {
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
@@ -129,9 +254,9 @@ func MergePR(repoPath, from, to string, runner Runner) Result {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
-	release, err := resolveRelease(repoPath, from)
+	release, err := resolveRemoteRelease(repoPath, from)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	action, message := mergeReleaseInto(repoPath, release.LocalBranch, to, runner)
@@ -144,7 +269,7 @@ func MergePR(repoPath, from, to string, runner Runner) Result {
 // git or gh failure yields a failed action.
 func mergeReleaseInto(repoPath, releaseBranch, to string, runner Runner) (Action, string) {
 	if err := validateTarget(repoPath, to); err != nil {
-		return ActionSkipped, err.Error()
+		return releaseErrorAction(err), err.Error()
 	}
 
 	number, err := runner.Run(repoPath, "gh", "pr", "list", "--base", to, "--head", releaseBranch, "--state", "open", "--json", "number", "--jq", ".[0].number")
@@ -187,23 +312,56 @@ func ensureClean(repoPath string) error {
 	return nil
 }
 
+// resolveRelease is used by release-pr. Automatic release selectors are always
+// authoritative to origin. Explicit branch names may be local-only because
+// release-pr can intentionally publish such a branch create-only.
 func resolveRelease(repoPath, from string) (branch.Resolution, error) {
+	if from == "latest-release" || from == "previous-release" {
+		return resolveRemoteRelease(repoPath, from)
+	}
+
 	branches, err := repo.ListBranches(repoPath)
 	if err != nil {
 		return branch.Resolution{}, err
 	}
-	return branch.Resolve(from, branches)
+	resolution, err := branch.Resolve(from, branches)
+	if err != nil {
+		return branch.Resolution{}, releaseSkip(err)
+	}
+	return resolution, nil
 }
 
+// resolveRemoteRelease requires the selected release branch to exist on origin.
+// It is used by merge/finish operations, where a local-only branch cannot have a
+// GitHub PR and must never be mistaken for an active remote release.
+func resolveRemoteRelease(repoPath, from string) (branch.Resolution, error) {
+	originBranches, err := repo.ListOriginBranches(repoPath)
+	if err != nil {
+		return branch.Resolution{}, err
+	}
+	remoteRefs := make([]string, 0, len(originBranches))
+	for _, name := range originBranches {
+		remoteRefs = append(remoteRefs, "origin/"+name)
+	}
+	resolution, err := branch.Resolve(from, repo.Branches{Remote: remoteRefs})
+	if err != nil {
+		return branch.Resolution{}, releaseSkip(err)
+	}
+	return resolution, nil
+}
+
+// validateTarget checks the live origin state rather than potentially stale
+// remote-tracking refs, so dry-run and real PR operations agree on target
+// existence.
 func validateTarget(repoPath, to string) error {
-	branches, err := repo.ListBranches(repoPath)
+	branches, err := repo.ListOriginBranches(repoPath)
 	if err != nil {
 		return err
 	}
-	if contains(branches.Remote, "origin/"+to) {
+	if contains(branches, to) {
 		return nil
 	}
-	return fmt.Errorf("target branch %q not found on origin", to)
+	return releaseSkip(fmt.Errorf("target branch %q not found on origin", to))
 }
 
 func contains(values []string, target string) bool {

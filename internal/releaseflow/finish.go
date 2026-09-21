@@ -30,20 +30,21 @@ func (o FinishOptions) withDefaults() FinishOptions {
 	return o
 }
 
-// PlanFinish reports what FinishRelease would do using the repository's current
-// local state. It performs no fetch and mutates nothing.
+// PlanFinish reports what FinishRelease would do. Release selection is resolved
+// against live origin state so a local-only or stale branch cannot be planned for
+// GitHub PR promotion. Planning does not mutate refs or pull requests.
 func PlanFinish(repoPath string, opts FinishOptions) Result {
 	opts = opts.withDefaults()
 
-	release, err := resolveRelease(repoPath, opts.From)
+	release, err := resolveRemoteRelease(repoPath, opts.From)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	message := fmt.Sprintf("would merge open PRs %s -> %s and %s -> %s with merge commits",
 		release.LocalBranch, opts.MasterBranch, release.LocalBranch, opts.DevelopBranch)
 	if opts.DeleteBranch {
-		message += fmt.Sprintf(", then delete %s", release.LocalBranch)
+		message += fmt.Sprintf(", then delete %s only if origin has not advanced it", release.LocalBranch)
 	}
 	return Result{RepoPath: repoPath, Action: ActionPlanned, Message: message}
 }
@@ -52,13 +53,18 @@ func PlanFinish(repoPath string, opts FinishOptions) Result {
 // both the production and integration branches with merge commits (never a
 // squash), preserving release history on both lines per the branching model.
 // Merges go through pull requests, so branch protection and review are honored;
-// only a git or gh failure produces a failed action. An already-integrated line
+// only a git or GitHub API failure produces a failed action. An already-integrated line
 // (no open PR) is reported as skipped, making the operation safe to re-run. The
 // release branch is deleted only when --delete-branch is set and both merges
-// succeeded in this run, so an unmerged branch is never removed.
+// succeeded in this run. Deletion compares the live remote SHA with the fetched
+// release SHA and then uses a force-with-lease. If GitHub already auto-deleted
+// the branch, that is treated as success; if the branch advanced, it is kept.
 func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 	opts = opts.withDefaults()
 
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
@@ -66,9 +72,9 @@ func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
-	release, err := resolveRelease(repoPath, opts.From)
+	release, err := resolveRemoteRelease(repoPath, opts.From)
 	if err != nil {
-		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
+		return Result{RepoPath: repoPath, Action: releaseErrorAction(err), Message: err.Error()}
 	}
 
 	var parts []string
@@ -86,11 +92,43 @@ func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 	}
 
 	if opts.DeleteBranch && !failed && merged == 2 {
-		if _, err := runner.Run(repoPath, "git", "push", "origin", "--delete", release.LocalBranch); err != nil {
-			parts = append(parts, "delete failed: "+err.Error())
+		releaseRef := "origin/" + release.LocalBranch
+		expectedSHA, err := runner.Run(repoPath, "git", "rev-parse", releaseRef)
+		if err != nil {
+			parts = append(parts, "delete precondition failed: "+err.Error())
+			failed = true
+		} else if strings.TrimSpace(expectedSHA) == "" {
+			parts = append(parts, "delete precondition failed: empty fetched release SHA")
 			failed = true
 		} else {
-			parts = append(parts, "deleted "+release.LocalBranch)
+			remoteRef := "refs/heads/" + release.LocalBranch
+			liveOutput, err := runner.Run(repoPath, "git", "ls-remote", "--heads", "origin", remoteRef)
+			if err != nil {
+				parts = append(parts, "delete precondition failed: "+err.Error())
+				failed = true
+			} else if strings.TrimSpace(liveOutput) == "" {
+				// GitHub may auto-delete a merged head branch. The desired final
+				// state is already reached, so there is nothing left to delete.
+				parts = append(parts, release.LocalBranch+" already absent on origin")
+			} else {
+				fields := strings.Fields(liveOutput)
+				if len(fields) < 2 {
+					parts = append(parts, "delete precondition failed: malformed ls-remote output")
+					failed = true
+				} else if fields[0] != strings.TrimSpace(expectedSHA) {
+					parts = append(parts, fmt.Sprintf("delete refused: %s advanced on origin", release.LocalBranch))
+					failed = true
+				} else {
+					lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", release.LocalBranch, strings.TrimSpace(expectedSHA))
+					deleteRefspec := fmt.Sprintf(":refs/heads/%s", release.LocalBranch)
+					if _, err := runner.Run(repoPath, "git", "push", lease, "origin", deleteRefspec); err != nil {
+						parts = append(parts, "delete refused: "+err.Error())
+						failed = true
+					} else {
+						parts = append(parts, "deleted "+release.LocalBranch)
+					}
+				}
+			}
 		}
 	}
 

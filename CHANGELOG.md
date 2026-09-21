@@ -4,6 +4,76 @@ All notable changes are documented in this file. The project follows [Semantic V
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-21
+
+### Added
+
+- Complete README usage guide covering requirements, `origin`/release naming
+  conventions, `latest-release` and `previous-release`, the end-to-end GitFlow
+  lifecycle, JSON/parallel operation, exit codes, safety behavior, and common
+  troubleshooting.
+- Regression coverage for remote-authoritative release selection, stale/deleted
+  refs, local-tag preservation, create-only ref publication, guarded branch deletion,
+  compatible release naming formats, and non-zero fleet failure reporting.
+
+### Fixed
+
+- `release-pr`, `release-merge`, and `release-finish`
+  no longer require the external GitHub CLI (`gh`). Git Fleet now performs PR
+  discovery, creation, and merge operations through the GitHub REST API while
+  preserving merge-commit-only release promotion.
+- GitHub PR mutations now preflight the configured `origin` and API token before
+  changing repository state. Authentication is read from `GH_TOKEN` /
+  `GITHUB_TOKEN` (or the GitHub Enterprise token variants) and is not persisted
+  by Git Fleet.
+- GitHub.com tokens are never reused for non-`github.com` origins; GitHub Enterprise hosts require explicitly enterprise-scoped token variables, preventing credentials from being sent to arbitrary origin hosts.
+- GitHub Enterprise HTTPS origins with explicit ports preserve that port; enterprise tokens require an exact `GIT_FLEET_GITHUB_HOST` match, plaintext `http://` origins are rejected, and redirects may not downgrade TLS or change API authority.
+
+### Changed
+
+- `sync` dry-run now reads live branch names from `origin`, and origin-backed
+  synchronization fast-forwards explicitly from `origin/<branch>` rather than
+  relying on arbitrary local upstream configuration.
+- `release-tag` treats `origin` as authoritative for release-branch selection
+  and patch-tag sequencing while preserving local-only tags. A conflicting local
+  tag fails safely instead of being deleted automatically.
+- Tag publication is create-only with a ref lease. A failed tag push removes only
+  the local tag created by that invocation best-effort; pre-existing local tags
+  are never pruned by routine sync or release operations.
+- Automatic `release-pr`, `release-merge`, and `release-finish` release selection
+  now reads live `origin` state. Target-branch checks also use live remote state,
+  avoiding stale remote-tracking refs during dry-run.
+- `release-pr` no longer pushes a same-named local branch when the source already
+  exists on `origin`. Explicit local-only sources are published create-only with
+  a lease.
+- `release-merge` and `release-finish` require their release source to exist on
+  `origin`; a local-only branch cannot be mistaken for a GitHub PR source.
+- `release-finish --delete-branch` now compares the live remote release SHA with
+  the fetched SHA and deletes with a lease. A concurrently advanced branch is
+  retained and reported as failed, while a branch already auto-deleted by GitHub
+  is accepted as the desired final state.
+- `--branch-format` and `--tag-format` are validated so Git Fleet cannot create
+  release names that later automatic commands cannot resolve. Release branches
+  must stay in the `release-X.Y[...]` / `release/X.Y[...]` families and release
+  tags must remain stable SemVer triples with an optional `v` prefix.
+- Fleet action commands now return a non-zero process exit after printing the
+  complete report when any repository is `FAILED`. `status` follows the same
+  rule for per-repository inspection errors; `SKIPPED` remains a successful
+  process outcome.
+- Operational failures while querying `origin` are reported as `FAILED`, while
+  expected no-op conditions such as a missing applicable release remain
+  `SKIPPED`.
+- CLI help now documents `previous-release` anywhere a release selector is
+  accepted and describes the supported release branch/tag format constraints.
+
+## [0.4.0] - 2026-08-30
+
+### Note
+
+- The published `v0.4.0` tag points to the same source commit as the previous
+  production line, so it contains no additional source changes relative to
+  `v0.3.1`. The accumulated unreleased changes are published in `v0.4.1`.
+
 ## [0.3.1] - 2026-07-28
 
 ### Fixed
@@ -78,7 +148,9 @@ All notable changes are documented in this file. The project follows [Semantic V
 - Guarded synchronization with dry-run planning.
 - GitFlow release pull request and merge commands.
 
-[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/black-osiris-technologies/git-fleet/compare/v0.2.0...v0.2.1

@@ -3,6 +3,7 @@ package branch
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,34 +22,43 @@ func Resolve(target string, branches repo.Branches) (Resolution, error) {
 		return Resolution{}, fmt.Errorf("target branch is required")
 	}
 
-	if target == "latest-release" {
-		return resolveLatestRelease(branches)
+	switch target {
+	case "latest-release":
+		return resolveActiveRelease(branches, 0)
+	case "previous-release":
+		return resolveActiveRelease(branches, 1)
+	default:
+		return resolveExplicit(target, branches)
 	}
-
-	return resolveExplicit(target, branches)
 }
 
 func resolveExplicit(target string, branches repo.Branches) (Resolution, error) {
-	if contains(branches.Local, target) {
-		return Resolution{Target: target, LocalBranch: target, Source: "local"}, nil
+	remoteRef := "origin/" + target
+	localExists := contains(branches.Local, target)
+	remoteExists := contains(branches.Remote, remoteRef)
+
+	if localExists {
+		resolution := Resolution{Target: target, LocalBranch: target, Source: "local"}
+		if remoteExists {
+			resolution.RemoteRef = remoteRef
+		}
+		return resolution, nil
 	}
 
-	remoteRef := "origin/" + target
-	if contains(branches.Remote, remoteRef) {
+	if remoteExists {
 		return Resolution{Target: target, LocalBranch: target, RemoteRef: remoteRef, Source: "remote"}, nil
 	}
 
 	return Resolution{}, fmt.Errorf("target %q not found locally or on origin", target)
 }
 
-func resolveLatestRelease(branches repo.Branches) (Resolution, error) {
+// resolveActiveRelease resolves an automatically selected release branch using
+// origin as the source of truth. Local-only release branches are deliberately
+// ignored: they may be stale branches whose remote counterpart was deleted.
+// rank 0 selects the latest active release and rank 1 the previous active one.
+func resolveActiveRelease(branches repo.Branches, rank int) (Resolution, error) {
 	var candidates []releaseCandidate
 
-	for _, branch := range branches.Local {
-		if candidate, ok := parseReleaseBranch(branch, branch, "local"); ok {
-			candidates = append(candidates, candidate)
-		}
-	}
 	for _, remoteRef := range branches.Remote {
 		if !strings.HasPrefix(remoteRef, "origin/") {
 			continue
@@ -60,25 +70,37 @@ func resolveLatestRelease(branches repo.Branches) (Resolution, error) {
 	}
 
 	if len(candidates) == 0 {
-		return Resolution{}, fmt.Errorf("no release branches found")
+		return Resolution{}, fmt.Errorf("no active release branches found on origin")
 	}
 
-	best := candidates[0]
-	for _, candidate := range candidates[1:] {
-		if compareVersions(candidate.version, best.version) > 0 {
-			best = candidate
+	sort.Slice(candidates, func(i, j int) bool {
+		comparison := compareVersions(candidates[i].version, candidates[j].version)
+		if comparison == 0 {
+			return candidates[i].name < candidates[j].name
 		}
+		return comparison > 0
+	})
+
+	if rank >= len(candidates) {
+		return Resolution{}, fmt.Errorf("previous-release requires at least 2 active release branches on origin")
 	}
 
-	resolution := Resolution{
-		Target:      best.name,
-		LocalBranch: best.name,
-		Source:      best.source,
+	selected := candidates[rank]
+	if contains(branches.Local, selected.name) {
+		return Resolution{
+			Target:      selected.name,
+			LocalBranch: selected.name,
+			RemoteRef:   selected.ref,
+			Source:      "local",
+		}, nil
 	}
-	if best.source == "remote" {
-		resolution.RemoteRef = best.ref
-	}
-	return resolution, nil
+
+	return Resolution{
+		Target:      selected.name,
+		LocalBranch: selected.name,
+		RemoteRef:   selected.ref,
+		Source:      "remote",
+	}, nil
 }
 
 type releaseCandidate struct {
