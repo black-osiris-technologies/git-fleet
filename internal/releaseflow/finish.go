@@ -53,7 +53,7 @@ func PlanFinish(repoPath string, opts FinishOptions) Result {
 // both the production and integration branches with merge commits (never a
 // squash), preserving release history on both lines per the branching model.
 // Merges go through pull requests, so branch protection and review are honored;
-// only a git or gh failure produces a failed action. An already-integrated line
+// only a git or GitHub API failure produces a failed action. An already-integrated line
 // (no open PR) is reported as skipped, making the operation safe to re-run. The
 // release branch is deleted only when --delete-branch is set and both merges
 // succeeded in this run. Deletion compares the live remote SHA with the fetched
@@ -62,6 +62,9 @@ func PlanFinish(repoPath string, opts FinishOptions) Result {
 func FinishRelease(repoPath string, opts FinishOptions, runner Runner) Result {
 	opts = opts.withDefaults()
 
+	if _, err := runner.Run(repoPath, "gh", "auth", "status"); err != nil {
+		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
+	}
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
