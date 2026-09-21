@@ -143,3 +143,14 @@ func TestGitHubDotComUsesGenericToken(t *testing.T) {
 		t.Fatalf("tokenFromEnv(github.com) = %q, want GH_TOKEN", got)
 	}
 }
+
+
+func TestParseRemoteRejectsHTTPOrigin(t *testing.T) {
+	_, _, _, _, err := parseRemote("http://ghe.example.com:8080/owner/repo.git")
+	if err == nil {
+		t.Fatal("parseRemote(http) error = nil, want insecure-origin rejection")
+	}
+	if !strings.Contains(err.Error(), "insecure HTTP origin") {
+		t.Fatalf("parseRemote(http) error = %q, want insecure-origin explanation", err)
+	}
+}
