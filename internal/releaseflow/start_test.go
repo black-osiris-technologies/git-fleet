@@ -116,7 +116,7 @@ func TestPlanStartIgnoresTagDeletedFromOriginButStillLocal(t *testing.T) {
 	}
 }
 
-func TestStartReleasePrunesDeletedOriginTagAndIgnoresIt(t *testing.T) {
+func TestStartReleasePreservesDeletedOriginTagButIgnoresIt(t *testing.T) {
 	clone, remote := createStartRepo(t, []string{"v2.2.9", "v2.3.5"}, nil)
 	runGit(t, clone, "push", "origin", ":refs/tags/v2.3.5")
 
@@ -127,8 +127,8 @@ func TestStartReleasePrunesDeletedOriginTagAndIgnoresIt(t *testing.T) {
 	if !remoteHasBranch(t, remote, "release-2.3") {
 		t.Fatal("StartRelease() did not derive release-2.3 from tags still present on origin")
 	}
-	if localHasTag(t, clone, "v2.3.5") {
-		t.Fatal("StartRelease() left tag v2.3.5 locally after it was deleted from origin")
+	if !localHasTag(t, clone, "v2.3.5") {
+		t.Fatal("StartRelease() removed local tag v2.3.5 even though release selection is based on origin")
 	}
 }
 
