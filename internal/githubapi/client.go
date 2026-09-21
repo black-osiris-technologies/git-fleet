@@ -41,7 +41,7 @@ func NewForRepo(repoPath string) (*Client, error) {
 		if strings.EqualFold(host, "github.com") {
 			return nil, fmt.Errorf("GitHub API authentication required: set GH_TOKEN or GITHUB_TOKEN")
 		}
-		return nil, fmt.Errorf("GitHub API authentication required for %s: set GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN, GH_TOKEN, or GITHUB_TOKEN", host)
+		return nil, fmt.Errorf("GitHub API authentication required for %s: set GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN", host)
 	}
 
 	return &Client{
@@ -209,6 +209,8 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 	}
 
 	var repoPath string
+	apiScheme := "https"
+	apiAuthority := ""
 	if strings.Contains(remote, "://") {
 		parsed, parseErr := url.Parse(remote)
 		if parseErr != nil || parsed.Hostname() == "" {
@@ -216,6 +218,12 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 		}
 		host = parsed.Hostname()
 		repoPath = strings.TrimPrefix(parsed.Path, "/")
+		if parsed.Scheme == "http" || parsed.Scheme == "https" {
+			// Preserve an explicit HTTPS/HTTP port for GitHub Enterprise API
+			// requests. SSH transport ports are not assumed to be API ports.
+			apiScheme = parsed.Scheme
+			apiAuthority = parsed.Host
+		}
 	} else if at := strings.LastIndex(remote, "@"); at >= 0 {
 		hostAndPath := remote[at+1:]
 		colon := strings.Index(hostAndPath, ":")
@@ -238,7 +246,10 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 	if strings.EqualFold(host, "github.com") {
 		apiBaseURL = "https://api.github.com"
 	} else {
-		apiBaseURL = "https://" + host + "/api/v3"
+		if apiAuthority == "" {
+			apiAuthority = host
+		}
+		apiBaseURL = apiScheme + "://" + apiAuthority + "/api/v3"
 	}
 	return host, owner, repository, apiBaseURL, nil
 }
@@ -246,7 +257,9 @@ func parseRemote(remote string) (host, owner, repository, apiBaseURL string, err
 func tokenFromEnv(host string) string {
 	names := []string{"GH_TOKEN", "GITHUB_TOKEN"}
 	if !strings.EqualFold(host, "github.com") {
-		names = []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"}
+		// Never fall back to a GitHub.com token for an arbitrary origin host.
+		// Enterprise hosts require an explicitly enterprise-scoped credential.
+		names = []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
 	}
 	for _, name := range names {
 		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
