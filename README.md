@@ -48,7 +48,7 @@ For GitHub Enterprise Server, set `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TO
 
 The token must have access to the target repository and permission to create or merge pull requests. For a fine-grained personal access token, grant the repository **Pull requests: write** permission. Repository review, status-check, and branch-protection requirements still apply; Git Fleet does not bypass them.
 
-Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported. Explicit ports on GitHub Enterprise HTTP(S) remotes are preserved for API requests.
+Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported. Explicit ports on GitHub Enterprise HTTPS remotes are preserved for API requests. Plaintext `http://` origins are rejected for authenticated GitHub API operations so bearer tokens are never sent without TLS.
 
 Real PR commands validate that a supported GitHub `origin` and a token are configured before performing Git mutations. `--dry-run` remains non-mutating and does not call the GitHub API, so it does not validate token correctness or repository API permissions.
 
