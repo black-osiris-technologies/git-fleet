@@ -44,11 +44,11 @@ For GitHub.com, set one of these environment variables before running a mutating
 - `GH_TOKEN` (preferred);
 - `GITHUB_TOKEN`.
 
-For GitHub Enterprise Server, set `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`. Git Fleet deliberately does **not** fall back to `GH_TOKEN` / `GITHUB_TOKEN` for non-`github.com` hosts, so a GitHub.com credential cannot be sent to an arbitrary `origin` host.
+For GitHub Enterprise Server, first set `GIT_FLEET_GITHUB_HOST` to the exact trusted API authority (`host` or `host:port`) derived from `origin`, then set `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`. Git Fleet refuses to release an enterprise token unless the configured authority matches exactly. It never falls back to `GH_TOKEN` / `GITHUB_TOKEN` for non-`github.com` hosts.
 
 The token must have access to the target repository and permission to create or merge pull requests. For a fine-grained personal access token, grant the repository **Pull requests: write** permission. Repository review, status-check, and branch-protection requirements still apply; Git Fleet does not bypass them.
 
-Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported. Explicit ports on GitHub Enterprise HTTPS remotes are preserved for API requests. Plaintext `http://` origins are rejected for authenticated GitHub API operations so bearer tokens are never sent without TLS.
+Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported. Explicit ports on GitHub Enterprise HTTPS remotes are preserved for API requests. Plaintext `http://` origins are rejected. API redirects are accepted only when they remain HTTPS and on the exact same API authority, preventing bearer-token forwarding to downgraded or different hosts.
 
 Real PR commands validate that a supported GitHub `origin` and a token are configured before performing Git mutations. `--dry-run` remains non-mutating and does not call the GitHub API, so it does not validate token correctness or repository API permissions.
 
@@ -256,7 +256,7 @@ Dry-run reads live branch names from `origin` with `git ls-remote`, so a deleted
 Real execution first runs the equivalent of:
 
 ```text
-git fetch --prune --prune-tags --tags
+git fetch --prune --tags
 ```
 
 For an origin-backed target, the selected local branch is then updated with a fast-forward-only merge from the explicit remote-tracking ref:
@@ -268,13 +268,12 @@ git merge --ff-only origin/<branch>
 This has several deliberate consequences:
 
 - deleted remote-tracking branches are pruned;
-- tags deleted from `origin` are pruned locally;
-- **local-only tags can therefore be deleted**;
+- local tags are preserved even when absent from `origin`;
 - Git Fleet never creates an implicit merge during synchronization;
 - a divergent branch fails instead of being rewritten;
 - local upstream configuration cannot redirect an origin-backed sync to another remote.
 
-Treat `origin` as authoritative for the tag namespace when using `sync`.
+Treat `origin` as authoritative for release decisions, but Git Fleet does not delete local-only tags during routine synchronization.
 
 ## Release lifecycle
 
@@ -338,7 +337,7 @@ Behavior:
 - minor is the default bump; `--major` starts the next major line;
 - patch releases remain on an existing release line;
 - dry-run reads branches/tags directly from `origin` without mutating local refs;
-- real execution prunes stale remote-tracking refs and tags first;
+- real execution prunes stale remote-tracking branches and fetches tags without deleting local-only tags;
 - a local-only branch with the same target name is preserved and ignored;
 - the release branch is created directly on `origin` from the fetched `origin/<base>`;
 - a create-only force-with-lease prevents a concurrent actor's new branch from being advanced accidentally;
@@ -373,7 +372,7 @@ Behavior:
 
 - branch and tag discovery is authoritative to live `origin`, including dry-run;
 - stale/deleted local tags do not advance the remote patch sequence;
-- real execution uses `fetch --prune --prune-tags --tags` first;
+- real execution uses `fetch --prune --tags`; local-only tags are preserved;
 - only tags on the selected MAJOR.MINOR line affect its next patch;
 - the annotated tag points at the fetched `origin/<release-branch>` tip;
 - publication uses a create-only tag lease, so an identically named tag created concurrently is never overwritten;
@@ -558,7 +557,7 @@ Git Fleet intentionally prefers a stopped operation over an ambiguous mutation.
 - Dry-run consults live remote state for operations whose meaning depends on `origin`.
 - Synchronization never resets a branch and never creates an implicit merge.
 - Origin-backed sync explicitly fast-forwards from `origin/<branch>` instead of trusting arbitrary local upstream configuration.
-- Tag pruning is explicit and documented; local-only tags may be removed.
+- Routine operations preserve local-only tags; release decisions still read live tag state from `origin`.
 - Release branch creation is create-only and lease guarded.
 - Tag publication is create-only and lease guarded.
 - Existing remote PR source branches are never replaced by same-named local state.
@@ -588,9 +587,9 @@ The repository needs at least two supported release branches on `origin`. Local-
 git ls-remote --heads origin 'refs/heads/release*'
 ```
 
-### A tag disappeared locally after sync/release operations
+### A local tag conflicts with the next release tag
 
-`sync`, `release-start`, and `release-tag` may use `--prune-tags`. A tag that does not exist on `origin` can therefore be removed locally. Do not rely on unpushed local tags when using these fleet operations.
+Git Fleet preserves local-only tags. Release sequencing is still derived from live `origin` state, so an existing local tag with the same name as the next remote tag can block creation rather than being deleted automatically. Inspect and resolve that local tag manually before retrying.
 
 ### GitHub PR commands fail
 
@@ -606,7 +605,7 @@ export GH_TOKEN="<token>"
 $env:GH_TOKEN = "<token>"
 ```
 
-`GITHUB_TOKEN` is also accepted for GitHub.com. On GitHub Enterprise Server, use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; generic GitHub.com token variables are intentionally ignored for enterprise hosts.
+`GITHUB_TOKEN` is also accepted for GitHub.com. On GitHub Enterprise Server, set `GIT_FLEET_GITHUB_HOST` to the exact trusted `host[:port]`, then use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; generic GitHub.com token variables are intentionally ignored.
 
 For a fine-grained token, verify that the target repository is included and **Pull requests: write** is granted. API errors are reported by repository with the HTTP status and GitHub message. Also verify branch-protection and required-review/status-check rules.
 
