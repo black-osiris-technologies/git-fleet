@@ -85,7 +85,7 @@ func TestPlanLatestReleaseReadsLiveOrigin(t *testing.T) {
 	}
 }
 
-func TestExecutePrunesLocalTagDeletedFromOrigin(t *testing.T) {
+func TestExecutePreservesLocalTagDeletedFromOrigin(t *testing.T) {
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	seed := filepath.Join(root, "seed")
@@ -106,8 +106,8 @@ func TestExecutePrunesLocalTagDeletedFromOrigin(t *testing.T) {
 	if plan.Action != ActionDone {
 		t.Fatalf("Execute() = %#v, want DONE", plan)
 	}
-	if got := runGitOutput(t, clone, "tag", "--list", "v1.0.0"); got != "" {
-		t.Fatalf("tag after sync = %q, want pruned", got)
+	if got := runGitOutput(t, clone, "tag", "--list", "v1.0.0"); got != "v1.0.0" {
+		t.Fatalf("tag after sync = %q, want preserved local tag v1.0.0", got)
 	}
 }
 
