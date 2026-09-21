@@ -44,11 +44,11 @@ For GitHub.com, set one of these environment variables before running a mutating
 - `GH_TOKEN` (preferred);
 - `GITHUB_TOKEN`.
 
-For GitHub Enterprise Server, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are also supported and take precedence over the generic token variables.
+For GitHub Enterprise Server, set `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`. Git Fleet deliberately does **not** fall back to `GH_TOKEN` / `GITHUB_TOKEN` for non-`github.com` hosts, so a GitHub.com credential cannot be sent to an arbitrary `origin` host.
 
 The token must have access to the target repository and permission to create or merge pull requests. For a fine-grained personal access token, grant the repository **Pull requests: write** permission. Repository review, status-check, and branch-protection requirements still apply; Git Fleet does not bypass them.
 
-Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported.
+Git Fleet reads the token from the environment for the current process and does not persist it. The repository owner/name and GitHub host are derived from the canonical `origin` remote. Standard GitHub HTTPS/SSH remotes and GitHub Enterprise Server remotes are supported. Explicit ports on GitHub Enterprise HTTP(S) remotes are preserved for API requests.
 
 Real PR commands validate that a supported GitHub `origin` and a token are configured before performing Git mutations. `--dry-run` remains non-mutating and does not call the GitHub API, so it does not validate token correctness or repository API permissions.
 
@@ -606,7 +606,7 @@ export GH_TOKEN="<token>"
 $env:GH_TOKEN = "<token>"
 ```
 
-`GITHUB_TOKEN` is also accepted. On GitHub Enterprise Server, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are supported as well.
+`GITHUB_TOKEN` is also accepted for GitHub.com. On GitHub Enterprise Server, use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; generic GitHub.com token variables are intentionally ignored for enterprise hosts.
 
 For a fine-grained token, verify that the target repository is included and **Pull requests: write** is granted. API errors are reported by repository with the HTTP status and GitHub message. Also verify branch-protection and required-review/status-check rules.
 
