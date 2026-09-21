@@ -95,8 +95,9 @@ func PlanTag(repoPath string, opts TagOptions) Result {
 }
 
 // CreateTag cuts the next patch tag on a repository's release line and pushes it.
-// It prunes stale local tags, derives the patch sequence from tags currently on
-// origin, and tags the fetched origin tip of the release branch. Publication is
+// It preserves local tags, derives the patch sequence from live tags on origin,
+// and tags the fetched origin tip of the release branch. A conflicting local tag
+// is never deleted automatically and will cause tag creation to fail safely. Publication is
 // create-only: a concurrent actor creating the same tag causes the push lease to
 // fail rather than replacing that tag. If publication fails, the local tag made
 // by this invocation is removed best-effort so a retry can refetch origin cleanly.
@@ -109,7 +110,7 @@ func CreateTag(repoPath string, opts TagOptions, runner Runner) Result {
 	if err := ensureClean(repoPath); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionSkipped, Message: err.Error()}
 	}
-	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--prune-tags", "--tags"); err != nil {
+	if _, err := runner.Run(repoPath, "git", "fetch", "--prune", "--tags"); err != nil {
 		return Result{RepoPath: repoPath, Action: ActionFailed, Message: err.Error()}
 	}
 
