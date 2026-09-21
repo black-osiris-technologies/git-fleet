@@ -124,12 +124,13 @@ func TestEnterpriseHostDoesNotUseGenericGitHubToken(t *testing.T) {
 	t.Setenv("GH_ENTERPRISE_TOKEN", "")
 	t.Setenv("GITHUB_ENTERPRISE_TOKEN", "")
 
-	if got := tokenFromEnv("ghe.example.com"); got != "" {
+	if got := tokenFromEnv("ghe.example.com", "https://ghe.example.com/api/v3"); got != "" {
 		t.Fatalf("tokenFromEnv(enterprise) = %q, want no generic-token fallback", got)
 	}
 
 	t.Setenv("GH_ENTERPRISE_TOKEN", "enterprise-token")
-	if got := tokenFromEnv("ghe.example.com"); got != "enterprise-token" {
+	t.Setenv("GIT_FLEET_GITHUB_HOST", "ghe.example.com")
+	if got := tokenFromEnv("ghe.example.com", "https://ghe.example.com/api/v3"); got != "enterprise-token" {
 		t.Fatalf("tokenFromEnv(enterprise) = %q, want enterprise token", got)
 	}
 }
@@ -139,7 +140,7 @@ func TestGitHubDotComUsesGenericToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_ENTERPRISE_TOKEN", "enterprise-token")
 
-	if got := tokenFromEnv("github.com"); got != "github-dot-com-token" {
+	if got := tokenFromEnv("github.com", "https://api.github.com"); got != "github-dot-com-token" {
 		t.Fatalf("tokenFromEnv(github.com) = %q, want GH_TOKEN", got)
 	}
 }
@@ -152,5 +153,44 @@ func TestParseRemoteRejectsHTTPOrigin(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "insecure HTTP origin") {
 		t.Fatalf("parseRemote(http) error = %q, want insecure-origin explanation", err)
+	}
+}
+
+
+func TestEnterpriseTokenRequiresExactApprovedAuthority(t *testing.T) {
+	t.Setenv("GH_ENTERPRISE_TOKEN", "enterprise-token")
+	t.Setenv("GIT_FLEET_GITHUB_HOST", "trusted.example.com:8443")
+
+	if got := tokenFromEnv("trusted.example.com", "https://trusted.example.com:8443/api/v3"); got != "enterprise-token" {
+		t.Fatalf("approved enterprise token = %q, want token", got)
+	}
+	if got := tokenFromEnv("attacker.example", "https://attacker.example/api/v3"); got != "" {
+		t.Fatalf("unapproved enterprise token = %q, want empty", got)
+	}
+	if got := tokenFromEnv("trusted.example.com", "https://trusted.example.com/api/v3"); got != "" {
+		t.Fatalf("wrong-port enterprise token = %q, want empty", got)
+	}
+}
+
+func TestHTTPClientRejectsUnsafeRedirects(t *testing.T) {
+	client, err := newHTTPClient("https://ghe.example.com:8443/api/v3")
+	if err != nil {
+		t.Fatalf("newHTTPClient() error = %v", err)
+	}
+	via, _ := http.NewRequest(http.MethodGet, "https://ghe.example.com:8443/api/v3/repos/o/r", nil)
+
+	httpDowngrade, _ := http.NewRequest(http.MethodGet, "http://ghe.example.com:8443/login", nil)
+	if err := client.CheckRedirect(httpDowngrade, []*http.Request{via}); err == nil {
+		t.Fatal("CheckRedirect(http downgrade) = nil, want rejection")
+	}
+
+	crossHost, _ := http.NewRequest(http.MethodGet, "https://attacker.example/login", nil)
+	if err := client.CheckRedirect(crossHost, []*http.Request{via}); err == nil {
+		t.Fatal("CheckRedirect(cross host) = nil, want rejection")
+	}
+
+	sameHost, _ := http.NewRequest(http.MethodGet, "https://ghe.example.com:8443/login", nil)
+	if err := client.CheckRedirect(sameHost, []*http.Request{via}); err != nil {
+		t.Fatalf("CheckRedirect(same HTTPS authority) error = %v", err)
 	}
 }
